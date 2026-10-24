@@ -103,15 +103,28 @@ static EmvSelectResult emv_select_apdu(
     uint32_t timeout = fwt;
     *response_len = 0;
     *status_word = 0;
+    EmvSelectResult outcome = EmvSelectTimeout;
+    uint8_t rx[EMV_FRAME_MAX];
     for(unsigned i = 0; i < EMV_MAX_EXCHANGES; i++) {
-        uint8_t rx[EMV_FRAME_MAX];
         size_t rx_len = sizeof(rx);
         EmvSelectResult result = exchange(context, tx, tx_len, rx, &rx_len, timeout);
-        if(result != EmvSelectOk) return result;
-        if(rx_len < 1 || rx_len > sizeof(rx)) return EmvSelectProtocolError;
+        if(result != EmvSelectOk) {
+            outcome = result;
+            break;
+        }
+        if(rx_len < 1 || rx_len > sizeof(rx)) {
+            outcome = EmvSelectProtocolError;
+            break;
+        }
         if(rx[0] == EMV_WTX) {
-            if(rx_len != 2 || rx[1] == 0 || rx[1] > 59) return EmvSelectProtocolError;
-            if(fwt > EMV_MAX_FWT_FC / rx[1]) return EmvSelectTimeout;
+            if(rx_len != 2 || rx[1] == 0 || rx[1] > 59) {
+                outcome = EmvSelectProtocolError;
+                break;
+            }
+            if(fwt > EMV_MAX_FWT_FC / rx[1]) {
+                outcome = EmvSelectTimeout;
+                break;
+            }
             timeout = fwt * rx[1];
             tx[0] = EMV_WTX;
             tx[1] = rx[1];
@@ -119,22 +132,31 @@ static EmvSelectResult emv_select_apdu(
             continue;
         }
         /* No CID/NAD was negotiated. Reject duplicate, R- and unexpected S-blocks. */
-        if((rx[0] & ~EMV_CHAIN) != (EMV_I_BLOCK | *block)) return EmvSelectProtocolError;
-        if(rx_len - 1 > EMV_RESPONSE_MAX - *response_len) return EmvSelectProtocolError;
+        if((rx[0] & ~EMV_CHAIN) != (EMV_I_BLOCK | *block) ||
+           rx_len - 1 > EMV_RESPONSE_MAX - *response_len) {
+            outcome = EmvSelectProtocolError;
+            break;
+        }
         memcpy(response + *response_len, rx + 1, rx_len - 1);
         *response_len += rx_len - 1;
         *block ^= 1;
         if(!(rx[0] & EMV_CHAIN)) {
-            if(*response_len < 2) return EmvSelectProtocolError;
+            if(*response_len < 2) {
+                outcome = EmvSelectProtocolError;
+                break;
+            }
             *response_len -= 2;
             *status_word = ((uint16_t)response[*response_len] << 8) | response[*response_len + 1];
-            return *status_word == EMV_SW_OK ? EmvSelectOk : EmvSelectRejected;
+            outcome = *status_word == EMV_SW_OK ? EmvSelectOk : EmvSelectRejected;
+            break;
         }
         tx[0] = EMV_R_ACK | *block;
         tx_len = 1;
         timeout = fwt;
     }
-    return EmvSelectTimeout;
+    memset(rx, 0, sizeof(rx));
+    memset(tx, 0, sizeof(tx));
+    return outcome;
 }
 
 EmvSelectResult emv_select_run(
@@ -146,6 +168,7 @@ EmvSelectResult emv_select_run(
     *status_word = 0;
     const uint8_t rats[] = {0xE0, 0x80}; /* FSD 256, no CID. */
     uint8_t response[EMV_RESPONSE_MAX];
+    uint8_t aid[16] = {0};
     size_t len = EMV_FRAME_MAX;
     EmvSelectResult result =
         exchange(context, rats, sizeof(rats), response, &len, EMV_RATS_FWT_FC);
@@ -161,7 +184,6 @@ EmvSelectResult emv_select_run(
         result = emv_select_apdu(
             exchange, context, fwt, &block, ppse, sizeof(ppse) - 1, response, &len, status_word);
         if(result == EmvSelectOk) {
-            uint8_t aid[16];
             size_t aid_len = 0;
             if(!emv_select_find_aid(response, len, 0, aid, &aid_len)) {
                 result = EmvSelectProtocolError;
@@ -180,5 +202,6 @@ EmvSelectResult emv_select_run(
         exchange(context, &deselect, 1, response, &len, EMV_RATS_FWT_FC);
     }
     memset(response, 0, sizeof(response));
+    memset(aid, 0, sizeof(aid));
     return result;
 }

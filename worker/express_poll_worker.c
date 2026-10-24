@@ -311,6 +311,8 @@ static void worker_step_felica(ExpressPollWorker* worker) {
 
 /* --- ECP / NFC-A ---------------------------------------------------------- */
 
+#define WORKER_UID_RANDOM_PREFIX 0x08U
+
 static ExpressPollResult worker_ecp_result(NfcaPollResult result) {
     switch(result) {
     case NfcaPollResultOk:
@@ -338,16 +340,27 @@ static EmvSelectResult worker_emv_exchange(
     iso14443_crc_append(Iso14443CrcTypeA, worker->tx);
     bit_buffer_reset(worker->rx);
     NfcError error = nfc_poller_trx(worker->nfc, worker->tx, worker->rx, fwt_fc);
-    if(error == NfcErrorTimeout) return EmvSelectTimeout;
-    if(error != NfcErrorNone) return EmvSelectTransportError;
-    if(!iso14443_crc_check(Iso14443CrcTypeA, worker->rx)) return EmvSelectProtocolError;
-    iso14443_crc_trim(worker->rx);
-    size_t size = bit_buffer_get_size_bytes(worker->rx);
-    if(size > *rx_len) return EmvSelectProtocolError;
-    bit_buffer_write_bytes(worker->rx, rx, size);
-    *rx_len = size;
+    EmvSelectResult result = EmvSelectOk;
+    if(error == NfcErrorTimeout) {
+        result = EmvSelectTimeout;
+    } else if(error != NfcErrorNone) {
+        result = EmvSelectTransportError;
+    } else if(!iso14443_crc_check(Iso14443CrcTypeA, worker->rx)) {
+        result = EmvSelectProtocolError;
+    } else {
+        iso14443_crc_trim(worker->rx);
+        size_t size = bit_buffer_get_size_bytes(worker->rx);
+        if(size > *rx_len) {
+            result = EmvSelectProtocolError;
+        } else {
+            bit_buffer_write_bytes(worker->rx, rx, size);
+            *rx_len = size;
+        }
+    }
+    /* Never keep selection responses around, whatever the outcome. */
     bit_buffer_reset(worker->rx);
-    return EmvSelectOk;
+    bit_buffer_reset(worker->tx);
+    return result;
 }
 
 static bool worker_emv_wait(void* context, uint32_t delay_fc) {
@@ -374,15 +387,22 @@ static void worker_handle_new_nfca(ExpressPollWorker* worker, const Iso14443_3aD
     EmvSelectResult result = EmvSelectUnsupported;
     if(iso14443_3a_supports_iso14443_4(data)) {
         result = emv_select_run(worker_emv_exchange, worker_emv_wait, worker, &status_word);
-        /* Recover even if ATS/DESELECT failed or the card vanished mid-exchange. */
-        worker->reset_field = true;
     }
+    /* Recover even if ATS/DESELECT failed, the card vanished, or it has no ISO-DEP:
+     * an activated card ignores WUPA until the field drops. */
+    worker->reset_field = true;
     worker_lock(worker);
     worker->status.phase = ExpressPollPhasePresent;
     worker->status.emv_result = result;
     worker->status.emv_status_word = status_word;
     worker_unlock(worker);
     worker_notify(worker);
+}
+
+/* ISO 14443-3 single-size UIDs starting with 0x08 are random and change on every
+ * activation (Apple devices do this), so they cannot identify a card across polls. */
+static bool worker_uid_is_random(const Iso14443_3aData* data) {
+    return data->uid_len == 4 && data->uid[0] == WORKER_UID_RANDOM_PREFIX;
 }
 
 static void worker_step_ecp(ExpressPollWorker* worker) {
@@ -407,8 +427,9 @@ static void worker_step_ecp(ExpressPollWorker* worker) {
     worker_unlock(worker);
 
     if(act == NfcaPollResultOk) {
-        bool same_card = phase == ExpressPollPhasePresent && known.uid_len == data.uid_len &&
-                         memcmp(known.uid, data.uid, data.uid_len) == 0;
+        bool same_card =
+            phase == ExpressPollPhasePresent && known.uid_len == data.uid_len &&
+            (worker_uid_is_random(&data) || memcmp(known.uid, data.uid, data.uid_len) == 0);
         if(same_card) {
             worker->misses = 0;
             worker_notify(worker);
