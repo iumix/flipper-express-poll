@@ -1,0 +1,6 @@
+ADD_SCENE(express_poll, start, Start)
+ADD_SCENE(express_poll, poll, Poll)
+ADD_SCENE(express_poll, system_code, SystemCode)
+ADD_SCENE(express_poll, custom_code, CustomCode)
+ADD_SCENE(express_poll, settings, Settings)
+ADD_SCENE(express_poll, about, About)

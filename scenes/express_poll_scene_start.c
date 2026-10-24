@@ -1,0 +1,62 @@
+#include "../express_poll_app_i.h"
+#include "../felica/felica_systems.h"
+
+#include <stdio.h>
+
+typedef enum {
+    StartIndexPoll,
+    StartIndexSystemCode,
+    StartIndexSettings,
+    StartIndexAbout,
+} StartIndex;
+
+static void express_poll_scene_start_submenu_callback(void* context, uint32_t index) {
+    ExpressPollApp* app = context;
+    view_dispatcher_send_custom_event(app->view_dispatcher, index);
+}
+
+void express_poll_scene_start_on_enter(void* context) {
+    ExpressPollApp* app = context;
+    Submenu* submenu = app->submenu;
+
+    char code[FELICA_SYSTEM_CODE_STR_SIZE];
+    felica_system_code_format(app->settings.system_code, code);
+    /* Submenu copies the label, so a stack buffer is fine. */
+    char label[32];
+    snprintf(label, sizeof(label), "System Code: %s", code);
+
+    submenu_add_item(
+        submenu, "Start Polling", StartIndexPoll, express_poll_scene_start_submenu_callback, app);
+    submenu_add_item(
+        submenu, label, StartIndexSystemCode, express_poll_scene_start_submenu_callback, app);
+    submenu_add_item(
+        submenu, "Settings", StartIndexSettings, express_poll_scene_start_submenu_callback, app);
+    submenu_add_item(
+        submenu, "About", StartIndexAbout, express_poll_scene_start_submenu_callback, app);
+    submenu_set_selected_item(
+        submenu, scene_manager_get_scene_state(app->scene_manager, ExpressPollSceneStart));
+
+    view_dispatcher_switch_to_view(app->view_dispatcher, ExpressPollViewSubmenu);
+}
+
+bool express_poll_scene_start_on_event(void* context, SceneManagerEvent event) {
+    ExpressPollApp* app = context;
+    if(event.type != SceneManagerEventTypeCustom) return false;
+
+    static const ExpressPollScene next[] = {
+        [StartIndexPoll] = ExpressPollScenePoll,
+        [StartIndexSystemCode] = ExpressPollSceneSystemCode,
+        [StartIndexSettings] = ExpressPollSceneSettings,
+        [StartIndexAbout] = ExpressPollSceneAbout,
+    };
+    if(event.event >= sizeof(next) / sizeof(next[0])) return false;
+
+    scene_manager_set_scene_state(app->scene_manager, ExpressPollSceneStart, event.event);
+    scene_manager_next_scene(app->scene_manager, next[event.event]);
+    return true;
+}
+
+void express_poll_scene_start_on_exit(void* context) {
+    ExpressPollApp* app = context;
+    submenu_reset(app->submenu);
+}

@@ -1,0 +1,17 @@
+# For details & more options, see documentation/AppManifests.md in the firmware repo
+
+App(
+    appid="apple_pay_express_poll",
+    name="Apple Pay Express Poll",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="express_poll_app",
+    requires=["gui", "storage", "notification"],
+    stack_size=4 * 1024,
+    # Host unit tests and the PN532 reference checkout are not part of the .fap
+    sources=["*.c", "!tests", "!transit-polling"],
+    fap_category="NFC",
+    fap_version="0.1",
+    fap_icon="express_poll.png",  # 10x10 1-bit PNG
+    fap_description="NFC-F system code polling to trigger Express Mode, with read-only balance for Suica and Octopus",
+    fap_author="iumix",
+)
