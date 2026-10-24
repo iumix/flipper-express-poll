@@ -16,8 +16,9 @@ static void express_poll_scene_poll_refresh(ExpressPollApp* app) {
     express_poll_worker_get_status(app->worker, &status);
     const bool running = express_poll_worker_is_running(app->worker);
 
-    /* Show the configured code even before the first start. */
+    /* Show the configured tech/code even before the first start. */
     if(!running && status.poll_count == 0) {
+        status.tech = app->poll_tech;
         status.polled_system_code = app->settings.system_code;
     }
 
@@ -33,6 +34,7 @@ static void express_poll_scene_poll_refresh(ExpressPollApp* app) {
 
 static void express_poll_scene_poll_start(ExpressPollApp* app) {
     const ExpressPollWorkerConfig config = {
+        .tech = app->poll_tech,
         .system_code = app->settings.system_code,
         .request_code = app->settings.request_code,
         .interval_ms = express_poll_settings_interval_ms(&app->settings),

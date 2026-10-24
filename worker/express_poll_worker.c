@@ -1,11 +1,15 @@
 #include "express_poll_worker.h"
 
 #include "../felica/felica_systems.h"
+#include "../nfca/ecp_frames.h"
+#include "../nfca/nfca_poll.h"
 
 #include <furi.h>
 #include <nfc/nfc.h>
 #include <nfc/helpers/felica_crc.h>
+#include <nfc/helpers/iso14443_crc.h>
 #include <nfc/protocols/felica/felica.h>
+#include <nfc/protocols/iso14443_3a/iso14443_3a.h>
 
 #include <string.h>
 
@@ -33,6 +37,7 @@ struct ExpressPollWorker {
     ExpressPollWorkerConfig config;
     ExpressPollStatus status; /* Guarded by mutex. */
     uint8_t misses;
+    bool reset_field;
 
     volatile bool running;
     volatile bool stop_requested;
@@ -253,7 +258,27 @@ static void worker_handle_new_card(ExpressPollWorker* worker, const FelicaPollin
     worker->misses = 0;
 }
 
-static void worker_step(ExpressPollWorker* worker) {
+/* No new card this poll: age the presence counter and maybe mark it removed. */
+static void worker_poll_miss(ExpressPollWorker* worker, ExpressPollPhase phase) {
+    if(phase == ExpressPollPhasePresent && ++worker->misses >= WORKER_REMOVAL_MISSES) {
+        worker_lock(worker);
+        worker->status.phase = ExpressPollPhaseSearching;
+        worker->status.card_present = false;
+        worker_unlock(worker);
+    }
+    worker_notify(worker);
+}
+
+/* Shared inter-poll wait; slower while a card is present to give phones air time. */
+static void worker_step_wait(ExpressPollWorker* worker, ExpressPollPhase phase) {
+    uint32_t interval = worker->config.interval_ms;
+    if(phase == ExpressPollPhasePresent && interval < WORKER_PRESENCE_MIN_INTERVAL_MS) {
+        interval = WORKER_PRESENCE_MIN_INTERVAL_MS;
+    }
+    worker_wait(worker, interval);
+}
+
+static void worker_step_felica(ExpressPollWorker* worker) {
     worker_lock(worker);
     const ExpressPollPhase phase = worker->status.phase;
     uint8_t idm[FELICA_FRAME_IDM_LEN];
@@ -277,29 +302,164 @@ static void worker_step(ExpressPollWorker* worker) {
         } else {
             worker_handle_new_card(worker, &resp);
         }
-    } else if(phase == ExpressPollPhasePresent && ++worker->misses >= WORKER_REMOVAL_MISSES) {
-        worker_lock(worker);
-        worker->status.phase = ExpressPollPhaseSearching;
-        worker->status.card_present = false;
-        worker_unlock(worker);
-        worker_notify(worker);
     } else {
-        worker_notify(worker);
+        worker_poll_miss(worker, phase);
     }
 
-    uint32_t interval = worker->config.interval_ms;
-    if(phase == ExpressPollPhasePresent && interval < WORKER_PRESENCE_MIN_INTERVAL_MS) {
-        interval = WORKER_PRESENCE_MIN_INTERVAL_MS;
+    worker_step_wait(worker, phase);
+}
+
+/* --- ECP / NFC-A ---------------------------------------------------------- */
+
+#define WORKER_UID_RANDOM_PREFIX 0x08U
+
+static ExpressPollResult worker_ecp_result(NfcaPollResult result) {
+    switch(result) {
+    case NfcaPollResultOk:
+        return ExpressPollResultSuccess;
+    case NfcaPollResultTimeout:
+        return ExpressPollResultTimeout;
+    case NfcaPollResultCollision:
+        return ExpressPollResultCrcError;
+    case NfcaPollResultError:
+        break;
     }
-    worker_wait(worker, interval);
+    return ExpressPollResultTransportError;
+}
+
+static EmvSelectResult worker_emv_exchange(
+    void* context,
+    const uint8_t* tx,
+    size_t tx_len,
+    uint8_t* rx,
+    size_t* rx_len,
+    uint32_t fwt_fc) {
+    ExpressPollWorker* worker = context;
+    if(worker->stop_requested) return EmvSelectCancelled;
+    bit_buffer_copy_bytes(worker->tx, tx, tx_len);
+    iso14443_crc_append(Iso14443CrcTypeA, worker->tx);
+    bit_buffer_reset(worker->rx);
+    NfcError error = nfc_poller_trx(worker->nfc, worker->tx, worker->rx, fwt_fc);
+    EmvSelectResult result = EmvSelectOk;
+    if(error == NfcErrorTimeout) {
+        result = EmvSelectTimeout;
+    } else if(error != NfcErrorNone) {
+        result = EmvSelectTransportError;
+    } else if(!iso14443_crc_check(Iso14443CrcTypeA, worker->rx)) {
+        result = EmvSelectProtocolError;
+    } else {
+        iso14443_crc_trim(worker->rx);
+        size_t size = bit_buffer_get_size_bytes(worker->rx);
+        if(size > *rx_len) {
+            result = EmvSelectProtocolError;
+        } else {
+            bit_buffer_write_bytes(worker->rx, rx, size);
+            *rx_len = size;
+        }
+    }
+    /* Never keep selection responses around, whatever the outcome. */
+    bit_buffer_reset(worker->rx);
+    bit_buffer_reset(worker->tx);
+    return result;
+}
+
+static bool worker_emv_wait(void* context, uint32_t delay_fc) {
+    ExpressPollWorker* worker = context;
+    worker_wait(worker, (delay_fc + 13559U) / 13560U);
+    return !worker->stop_requested;
+}
+
+static void worker_handle_new_nfca(ExpressPollWorker* worker, const Iso14443_3aData* data) {
+    worker_lock(worker);
+    worker->status.detect_count++;
+    worker->status.has_card = true;
+    worker->status.card_present = true;
+    worker->status.nfca = *data;
+    worker->status.emv_result = EmvSelectNotAttempted;
+    worker->status.emv_status_word = 0;
+    worker->status.phase = ExpressPollPhaseReading;
+    worker_unlock(worker);
+
+    worker->misses = 0;
+    worker_notify(worker);
+
+    uint16_t status_word = 0;
+    EmvSelectResult result = EmvSelectUnsupported;
+    if(iso14443_3a_supports_iso14443_4(data)) {
+        result = emv_select_run(worker_emv_exchange, worker_emv_wait, worker, &status_word);
+    }
+    /* Recover even if ATS/DESELECT failed, the card vanished, or it has no ISO-DEP:
+     * an activated card ignores WUPA until the field drops. */
+    worker->reset_field = true;
+    worker_lock(worker);
+    worker->status.phase = ExpressPollPhasePresent;
+    worker->status.emv_result = result;
+    worker->status.emv_status_word = status_word;
+    worker_unlock(worker);
+    worker_notify(worker);
+}
+
+/* ISO 14443-3 single-size UIDs starting with 0x08 are random and change on every
+ * activation (Apple devices do this), so they cannot identify a card across polls. */
+static bool worker_uid_is_random(const Iso14443_3aData* data) {
+    return data->uid_len == 4 && data->uid[0] == WORKER_UID_RANDOM_PREFIX;
+}
+
+static void worker_step_ecp(ExpressPollWorker* worker) {
+    worker_lock(worker);
+    const ExpressPollPhase phase = worker->status.phase;
+    const Iso14443_3aData known = worker->status.nfca;
+    worker_unlock(worker);
+
+    uint8_t frame[ECP_FRAME_PAYMENT_LEN];
+    size_t frame_len = ecp_frame_build_payment(frame, sizeof(frame));
+
+    /* Broadcast ECP (unanswered), then poll NFC-A for the presented card. */
+    NfcaPollResult ecp = nfca_poll_send_ecp(worker->nfc, worker->tx, worker->rx, frame, frame_len);
+    Iso14443_3aData data;
+    NfcaPollResult act = (ecp == NfcaPollResultOk) ?
+                             nfca_poll_activate(worker->nfc, worker->tx, worker->rx, &data) :
+                             NfcaPollResultError;
+
+    worker_lock(worker);
+    worker->status.poll_count++;
+    worker->status.last_result = worker_ecp_result(act);
+    worker_unlock(worker);
+
+    if(act == NfcaPollResultOk) {
+        bool same_card =
+            phase == ExpressPollPhasePresent && known.uid_len == data.uid_len &&
+            (worker_uid_is_random(&data) || memcmp(known.uid, data.uid, data.uid_len) == 0);
+        if(same_card) {
+            worker->misses = 0;
+            worker_notify(worker);
+        } else {
+            worker_handle_new_nfca(worker, &data);
+        }
+    } else {
+        worker_poll_miss(worker, phase);
+    }
+
+    worker_step_wait(worker, phase);
 }
 
 static NfcCommand worker_nfc_callback(NfcEvent event, void* context) {
     ExpressPollWorker* worker = context;
 
     if(worker->stop_requested) return NfcCommandStop;
-    if(event.type == NfcEventTypePollerReady) worker_step(worker);
-    return worker->stop_requested ? NfcCommandStop : NfcCommandContinue;
+    if(event.type == NfcEventTypePollerReady) {
+        if(worker->config.tech == ExpressPollTechEcp) {
+            worker_step_ecp(worker);
+        } else {
+            worker_step_felica(worker);
+        }
+    }
+    if(worker->stop_requested) return NfcCommandStop;
+    if(worker->reset_field) {
+        worker->reset_field = false;
+        return NfcCommandReset;
+    }
+    return NfcCommandContinue;
 }
 
 /* --- Public API ----------------------------------------------------------- */
@@ -340,23 +500,32 @@ void express_poll_worker_start(ExpressPollWorker* worker, const ExpressPollWorke
     worker->config = *config;
     worker->misses = 0;
     worker->stop_requested = false;
+    worker->reset_field = false;
     worker->update_pending = false;
 
     worker_lock(worker);
     memset(&worker->status, 0, sizeof(worker->status));
+    worker->status.tech = config->tech;
     worker->status.phase = ExpressPollPhaseSearching;
     worker->status.polled_system_code = config->system_code;
     worker_unlock(worker);
 
     worker->nfc = nfc_alloc();
-    nfc_config(worker->nfc, NfcModePoller, NfcTechFelica);
-    nfc_set_guard_time_us(worker->nfc, FELICA_GUARD_TIME_US);
-    nfc_set_fdt_poll_fc(worker->nfc, FELICA_FDT_POLL_FC);
-    nfc_set_fdt_poll_poll_us(worker->nfc, FELICA_POLL_POLL_MIN_US);
+    if(config->tech == ExpressPollTechEcp) {
+        nfc_config(worker->nfc, NfcModePoller, NfcTechIso14443a);
+        nfc_set_guard_time_us(worker->nfc, ISO14443_3A_GUARD_TIME_US);
+        nfc_set_fdt_poll_fc(worker->nfc, ISO14443_3A_FDT_POLL_FC);
+        nfc_set_fdt_poll_poll_us(worker->nfc, ISO14443_3A_POLL_POLL_MIN_US);
+    } else {
+        nfc_config(worker->nfc, NfcModePoller, NfcTechFelica);
+        nfc_set_guard_time_us(worker->nfc, FELICA_GUARD_TIME_US);
+        nfc_set_fdt_poll_fc(worker->nfc, FELICA_FDT_POLL_FC);
+        nfc_set_fdt_poll_poll_us(worker->nfc, FELICA_POLL_POLL_MIN_US);
+    }
 
     worker->running = true;
     nfc_start(worker->nfc, worker_nfc_callback, worker);
-    FURI_LOG_I(TAG, "Polling 0x%04X", config->system_code);
+    FURI_LOG_I(TAG, "Polling %s", config->tech == ExpressPollTechEcp ? "ECP (NFC-A)" : "FeliCa");
 }
 
 void express_poll_worker_stop(ExpressPollWorker* worker) {

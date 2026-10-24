@@ -10,15 +10,23 @@ cards in Apple Wallet, and reads balances using read-only FeliCa commands.
 
 These rules are not negotiable:
 
-- **Read-only.** Only send Polling (0x00), Request Service (0x02) and Read Without
-  Encryption (0x06). Never add Write (0x08), authentication, or any command that
-  changes card state. Balance services must have a read-only, key-free attribute
+- **Read-only.** FeliCa: only send Polling (0x00), Request Service (0x02) and Read
+  Without Encryption (0x06). Never add Write (0x08), authentication, or any command
+  that changes card state. Balance services must have a read-only, key-free attribute
   (`0x0B`, `0x0F` or `0x17` in the low 6 bits); `tests/` enforces this.
+- **ECP selection-only exception.** After ECP and NFC-A identification, RATS/ISO-DEP,
+  SELECT PPSE and SELECT of one advertised payment AID are allowed solely to test
+  the Wallet animation. Parse only directory AIDs and response status; discard
+  selection response bodies. Stop after selection. Never send GPO, READ RECORD,
+  GET DATA, GENERATE AC, authentication, or transaction commands. Do not extract,
+  log, display or persist payment/cardholder data. ISO-DEP flow control and
+  deselection are allowed; all exchanges must be bounded and cancellable.
 - **No invented decoders.** Add a balance layout only if it comes from a verified
   source (the reference implementation, a public spec, or a documented hardware
   dump). Never show a value you cannot justify. Report errors instead.
 - **No simulated data.** No fake responses, hardcoded balances or placeholder polling.
-- **No payment features**: no terminal emulation, no key or credential extraction.
+- **No payment features**: no payment transactions, terminal transaction processing,
+  or key/credential extraction. The selection-only exception above is the only EMV use.
 - **Honest status.** Do not mark anything as hardware-verified in `README.md`
   unless someone actually ran it on a Flipper and recorded the result.
 
@@ -30,6 +38,9 @@ express_poll.png                10x10 1-bit icon
 express_poll_app.c / _app_i.h   App struct, alloc/free, ViewDispatcher + SceneManager wiring
 felica/felica_frames.[ch]       PURE: build/parse Polling, Request Service, Read; PMm timeouts
 felica/felica_systems.[ch]      PURE: system code names, hex parse/format, wildcard check
+nfca/ecp_frames.[ch]            PURE: build the Apple ECP frame (NFC-A, no CRC)
+nfca/nfca_poll.[ch]             ECP broadcast + NFC-A activation (WUPA + anticollision)
+nfca/emv_select.[ch]            PURE: bounded ISO-DEP + selection-only EMV probe
 balance/balance.[ch]            PURE: decoder registry + formatting
 balance/balance_<system>.c      PURE: one decoder per system
 settings/express_poll_settings.[ch]  FlipperFormat load/save (/ext/apps_data/<appid>/settings.txt)
@@ -46,12 +57,26 @@ library, because they are compiled on the host by `tests/Makefile`.
 
 ## Architecture
 
-- **Transport:** the worker uses the raw `Nfc` API (`nfc_alloc`,
+- **Two technologies, two modes.** `nfc_config()` binds one technology for the
+  whole run and cannot switch mid-run (it requires the idle config state, reached
+  only after `nfc_stop`). So FeliCa and NFC-A cannot share one poll loop; the
+  worker has a `tech` in its config (`ExpressPollTechFelica` / `ExpressPollTechEcp`)
+  and the UI exposes them as two separate menu entries that each start the worker.
+- **FeliCa transport:** the worker uses the raw `Nfc` API (`nfc_alloc`,
   `nfc_config(NfcModePoller, NfcTechFelica)`, `nfc_start`, `nfc_poller_trx`) with
   `felica_crc_append/check/trim`. The stock `felica_poller` is unusable here
   because `felica_poller_activate` hardcodes system code `0xFFFF`. Timing
   constants (`FELICA_GUARD_TIME_US`, `FELICA_FDT_POLL_FC`, `FELICA_POLL_POLL_MIN_US`)
   match the firmware poller.
+- **ECP transport (NFC-A):** config `NfcTechIso14443a` with the `ISO14443_3A_*`
+  timing constants. Each step broadcasts the ECP frame via `nfc_poller_trx` after
+  `iso14443_crc_append(Iso14443CrcTypeA, ...)`; ECP is **not answered**, so
+  `NfcErrorTimeout` is the success case. It then runs `nfca_poll_activate`
+  (WUPA short frame + SDD/SEL anticollision, adapted from the firmware's
+  internal `iso14443_3a_poller_activate`, using the exported
+  `nfc_iso14443a_poller_trx_short_frame` / `_trx_sdd_frame` primitives) to get
+  UID/ATQA/SAK. The selection-only exception above then permits ISO-DEP activation
+  and payment application selection. Keep the FeliCa path unchanged.
 - **Frames** built by `felica_frames.c` include the LEN byte but no CRC. Response
   buffers are passed with the CRC already trimmed. System codes are big-endian
   in Polling; service codes are little-endian everywhere else.

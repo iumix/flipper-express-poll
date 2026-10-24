@@ -5,6 +5,7 @@
 
 typedef enum {
     StartIndexPoll,
+    StartIndexEcp,
     StartIndexSystemCode,
     StartIndexSettings,
     StartIndexAbout,
@@ -26,7 +27,17 @@ void express_poll_scene_start_on_enter(void* context) {
     snprintf(label, sizeof(label), "System Code: %s", code);
 
     submenu_add_item(
-        submenu, "Start Polling", StartIndexPoll, express_poll_scene_start_submenu_callback, app);
+        submenu,
+        "Start Polling (Transit)",
+        StartIndexPoll,
+        express_poll_scene_start_submenu_callback,
+        app);
+    submenu_add_item(
+        submenu,
+        "Express Card (ECP)",
+        StartIndexEcp,
+        express_poll_scene_start_submenu_callback,
+        app);
     submenu_add_item(
         submenu, label, StartIndexSystemCode, express_poll_scene_start_submenu_callback, app);
     submenu_add_item(
@@ -45,11 +56,16 @@ bool express_poll_scene_start_on_event(void* context, SceneManagerEvent event) {
 
     static const ExpressPollScene next[] = {
         [StartIndexPoll] = ExpressPollScenePoll,
+        [StartIndexEcp] = ExpressPollScenePoll,
         [StartIndexSystemCode] = ExpressPollSceneSystemCode,
         [StartIndexSettings] = ExpressPollSceneSettings,
         [StartIndexAbout] = ExpressPollSceneAbout,
     };
     if(event.event >= sizeof(next) / sizeof(next[0])) return false;
+
+    /* The Poll scene reads poll_tech to decide which technology to start. */
+    if(event.event == StartIndexPoll) app->poll_tech = ExpressPollTechFelica;
+    if(event.event == StartIndexEcp) app->poll_tech = ExpressPollTechEcp;
 
     scene_manager_set_scene_state(app->scene_manager, ExpressPollSceneStart, event.event);
     scene_manager_next_scene(app->scene_manager, next[event.event]);
