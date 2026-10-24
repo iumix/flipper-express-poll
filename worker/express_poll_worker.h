@@ -8,6 +8,7 @@
 #pragma once
 
 #include "../balance/balance.h"
+#include "../nfca/emv_select.h"
 #include "../felica/felica_frames.h"
 
 #include <lib/nfc/protocols/iso14443_3a/iso14443_3a.h>
@@ -80,6 +81,8 @@ typedef struct {
 
     /* ECP / NFC-A (ExpressPollTechEcp). */
     Iso14443_3aData nfca;
+    EmvSelectResult emv_result;
+    uint16_t emv_status_word;
 } ExpressPollStatus;
 
 /** Called from the NFC thread when status changed. Must not block. */

@@ -17,8 +17,9 @@ BUILD = build
 BIN = $(BUILD)/test_express_poll
 
 .PHONY: test clean
-test: $(BIN)
+test: $(BIN) $(BUILD)/test_emv_select
 	./$(BIN)
+	./$(BUILD)/test_emv_select
 
 $(BIN): $(SRCS) $(wildcard ../felica/*.h ../balance/*.h ../nfca/*.h)
 	@mkdir -p $(BUILD)
@@ -26,3 +27,7 @@ $(BIN): $(SRCS) $(wildcard ../felica/*.h ../balance/*.h ../nfca/*.h)
 
 clean:
 	rm -rf $(BUILD)
+
+$(BUILD)/test_emv_select: test_emv_select.c ../nfca/emv_select.c ../nfca/emv_select.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) test_emv_select.c ../nfca/emv_select.c $(LDFLAGS) -o $@

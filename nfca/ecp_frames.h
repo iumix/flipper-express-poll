@@ -6,8 +6,7 @@
  * to tell a nearby iPhone/Apple Watch which kind of pass to present. It is
  * documented at https://github.com/kormax/apple-enhanced-contactless-polling.
  *
- * This app sends only the generic payment/VAS frame (ECP v1, TCI 00 00 00),
- * which asks the device to present its Express payment card. ECP is NOT
+ * This app sends the documented TfL ECP v2 transit frame with EMV fallback. ECP is NOT
  * answered by the device; it responds to the regular NFC-A poll that follows.
  *
  * Pure C: no Flipper dependencies, shared with the host unit tests. The frame
@@ -21,13 +20,13 @@
 #include <stdint.h>
 
 #define ECP_FRAME_HEADER    0x6AU
-#define ECP_FRAME_VERSION_1 0x01U
+#define ECP_FRAME_VERSION_2 0x02U
 
-/* 6A 01 00 00 00 -> generic "VAS or payment" ECP v1 frame. */
-#define ECP_FRAME_PAYMENT_LEN 5U
+/* TfL transit TCI plus five-byte EMV fallback mask. */
+#define ECP_FRAME_PAYMENT_LEN 13U
 
 /**
- * Build the generic payment/VAS ECP v1 frame (without CRC_A).
+ * Build the TfL transit ECP v2 frame (without CRC_A).
  *
  * @return the frame length, or 0 if the buffer is too small.
  */

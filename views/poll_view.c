@@ -50,7 +50,7 @@ static void poll_view_status_line(const PollViewModel* model, char* out, size_t 
     if(!model->running) {
         phase = "Stopped";
     } else if(status->phase == ExpressPollPhaseReading) {
-        phase = "Reading";
+        phase = status->tech == ExpressPollTechEcp ? "Selecting" : "Reading";
     } else if(status->phase == ExpressPollPhasePresent) {
         phase = "Present";
     } else if(status->has_card) {
@@ -152,8 +152,41 @@ static void poll_view_draw_callback(Canvas* canvas, void* model_ptr) {
             status->nfca.atqa[0],
             status->nfca.sak);
         canvas_draw_str(canvas, 0, 39, line);
-        /* We only completed anticollision; no app selection, so no committed UI. */
-        canvas_draw_str(canvas, 0, 48, "Device answered (NFC-A)");
+        const char* selection;
+        switch(status->emv_result) {
+        case EmvSelectOk:
+            selection = "App selected";
+            break;
+        case EmvSelectNotAttempted:
+            selection = "Selecting app...";
+            break;
+        case EmvSelectUnsupported:
+            selection = "ISO-DEP unsupported";
+            break;
+        case EmvSelectTimeout:
+            selection = "Select timed out";
+            break;
+        case EmvSelectProtocolError:
+            selection = "Invalid select reply";
+            break;
+        case EmvSelectTransportError:
+            selection = "Select NFC error";
+            break;
+        case EmvSelectNoApplication:
+            selection = "No payment app";
+            break;
+        case EmvSelectCancelled:
+            selection = "Selection stopped";
+            break;
+        case EmvSelectRejected:
+            snprintf(line, sizeof(line), "Select rejected %04X", status->emv_status_word);
+            selection = line;
+            break;
+        default:
+            selection = "Selection unavailable";
+            break;
+        }
+        canvas_draw_str(canvas, 0, 48, selection);
     } else if(status->has_card) {
         char hex[FELICA_FRAME_IDM_LEN * 2 + 1] = {0};
         poll_view_hex(status->card.idm, FELICA_FRAME_IDM_LEN, hex, sizeof(hex));

@@ -14,15 +14,19 @@ These rules are not negotiable:
   Without Encryption (0x06). Never add Write (0x08), authentication, or any command
   that changes card state. Balance services must have a read-only, key-free attribute
   (`0x0B`, `0x0F` or `0x17` in the low 6 bits); `tests/` enforces this.
-- **ECP is a wake + identify only.** Broadcast the ECP frame and run NFC-A
-  anticollision to UID/ATQA/SAK, nothing further. Do not add RATS/ISO-DEP, PPSE/EMV
-  AID selection, or any reading of payment/cardholder data. EMV payment cards expose
-  no balance to a poller, so there is nothing balance-like to add.
+- **ECP selection-only exception.** After ECP and NFC-A identification, RATS/ISO-DEP,
+  SELECT PPSE and SELECT of one advertised payment AID are allowed solely to test
+  the Wallet animation. Parse only directory AIDs and response status; discard
+  selection response bodies. Stop after selection. Never send GPO, READ RECORD,
+  GET DATA, GENERATE AC, authentication, or transaction commands. Do not extract,
+  log, display or persist payment/cardholder data. ISO-DEP flow control and
+  deselection are allowed; all exchanges must be bounded and cancellable.
 - **No invented decoders.** Add a balance layout only if it comes from a verified
   source (the reference implementation, a public spec, or a documented hardware
   dump). Never show a value you cannot justify. Report errors instead.
 - **No simulated data.** No fake responses, hardcoded balances or placeholder polling.
-- **No payment features**: no terminal emulation, no key or credential extraction.
+- **No payment features**: no payment transactions, terminal transaction processing,
+  or key/credential extraction. The selection-only exception above is the only EMV use.
 - **Honest status.** Do not mark anything as hardware-verified in `README.md`
   unless someone actually ran it on a Flipper and recorded the result.
 
@@ -35,7 +39,8 @@ express_poll_app.c / _app_i.h   App struct, alloc/free, ViewDispatcher + SceneMa
 felica/felica_frames.[ch]       PURE: build/parse Polling, Request Service, Read; PMm timeouts
 felica/felica_systems.[ch]      PURE: system code names, hex parse/format, wildcard check
 nfca/ecp_frames.[ch]            PURE: build the Apple ECP frame (NFC-A, no CRC)
-nfca/nfca_poll.[ch]             ECP broadcast + minimal NFC-A activation (SENS_REQ + anticollision)
+nfca/nfca_poll.[ch]             ECP broadcast + NFC-A activation (WUPA + anticollision)
+nfca/emv_select.[ch]            PURE: bounded ISO-DEP + selection-only EMV probe
 balance/balance.[ch]            PURE: decoder registry + formatting
 balance/balance_<system>.c      PURE: one decoder per system
 settings/express_poll_settings.[ch]  FlipperFormat load/save (/ext/apps_data/<appid>/settings.txt)
@@ -67,11 +72,11 @@ library, because they are compiled on the host by `tests/Makefile`.
   timing constants. Each step broadcasts the ECP frame via `nfc_poller_trx` after
   `iso14443_crc_append(Iso14443CrcTypeA, ...)`; ECP is **not answered**, so
   `NfcErrorTimeout` is the success case. It then runs `nfca_poll_activate`
-  (SENS_REQ short frame + SDD/SEL anticollision, adapted from the firmware's
+  (WUPA short frame + SDD/SEL anticollision, adapted from the firmware's
   internal `iso14443_3a_poller_activate`, using the exported
   `nfc_iso14443a_poller_trx_short_frame` / `_trx_sdd_frame` primitives) to get
-  UID/ATQA/SAK. Activation **stops at SAK**: no RATS/ISO-DEP, no EMV/PPSE, no card
-  data. This is the read-only boundary for payment cards — keep it.
+  UID/ATQA/SAK. The selection-only exception above then permits ISO-DEP activation
+  and payment application selection. Keep the FeliCa path unchanged.
 - **Frames** built by `felica_frames.c` include the LEN byte but no CRC. Response
   buffers are passed with the CRC already trimmed. System codes are big-endian
   in Polling; service codes are little-endian everywhere else.

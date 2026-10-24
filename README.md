@@ -8,8 +8,8 @@ on a nearby iPhone or Apple Watch:
    balance with read-only FeliCa commands.
 2. **Express Card (NFC-A / ECP):** broadcasts Apple's Enhanced Contactless Polling
    frame to wake an Express **payment** (or open-loop transit) card, then identifies
-   the card it presents (UID, ATQA, SAK). It reads **no** card data beyond those
-   anticollision identifiers.
+   device (UID, ATQA, SAK) and selects a payment application to test the Wallet
+   animation. It does not read payment records or initiate a transaction.
 
 The FeliCa side is a Flipper port of the PN532/libnfc tools in
 [transit-polling](https://github.com/iumix/transit-polling). The ECP frame is from
@@ -18,7 +18,7 @@ the public reverse-engineering at
 
 > Not affiliated with or endorsed by Apple, JR East or Octopus Cards Ltd.
 > The app never makes payments, never writes to a card and never touches keys,
-> and it never reads payment-card (EMV) data.
+> and it never reads payment records.
 
 ## Features
 
@@ -42,12 +42,14 @@ the public reverse-engineering at
 
 ### Express Card (ECP) mode
 
-- Broadcasts the generic payment/VAS ECP v1 frame `6A 01 00 00 00` (CRC_A appended by the
-  radio) on NFC-A, at the same start/stop and non-blocking-UI model as the transit mode
-- Wakes the default Express payment card so the device presents it, then runs a standard
-  NFC-A SENS_REQ + anticollision and shows **UID, ATQA, SAK** and "Device answered (NFC-A)"
-- **Stops there.** No RATS/ISO-DEP, no EMV/PPSE selection, no PAN or cardholder data. EMV
-  payment cards expose no balance to a poller, so there is nothing balance-like to show
+- Broadcasts the documented TfL ECP v2 transit configuration with Express payment
+  fallback on NFC-A. This is a specific transit profile, not a universal gate frame.
+- Identifies the device, activates ISO-DEP, selects PPSE, then selects the first
+  payment application advertised in that directory. Stops after SELECT.
+- Shows `App selected` only when the application returns success. This confirms
+  selection, not a visible animation or a completed payment.
+- Shows selection errors and rejection status words; no payment records, account
+  numbers, cardholder details or selection response bodies are displayed or saved.
 
 ## Verification status
 
@@ -65,22 +67,22 @@ the public reverse-engineering at
 | Waking Express Transit (FeliCa) on iPhone / Apple Watch | ✅ | ❌ | ✅ iPhone 18 Pro + Apple Watch: Suica `0x0003`, Octopus `0x8008` |
 | Balance read from Apple Wallet Suica / Octopus | ✅ | ❌ | ✅ iPhone 18 Pro + Apple Watch |
 | Balance read from physical Suica / Octopus cards | ✅ | ❌ | ✅ physical Suica · ⏳ physical Octopus |
-| ECP frame construction (`6A 01 00 00 00`) | ✅ | ✅ byte-exact against the published frame | – |
-| ECP broadcast + NFC-A activation (UID/ATQA/SAK) | ✅ | ❌ (needs the Flipper NFC HAL) | ✅ iPhone 18 Pro + Apple Watch answer on NFC-A |
-| Committed Express **payment** card UI (animation) via ECP | ⬜ out of scope | – | ❌ no animation (expected: see note) |
+| TfL ECP v2 frame construction | ✅ | ✅ byte-exact against the published configuration | ✅ user-reported animation with selection enabled |
+| ECP broadcast + NFC-A activation (UID/ATQA/SAK) | ✅ | ❌ (needs the Flipper NFC HAL) | ✅ prior generic frame: iPhone 18 Pro + Apple Watch; TfL selection flow also reported working |
+| ISO-DEP + PPSE/application selection | ✅ | ✅ protocol fixtures, malformed replies, chaining, WTX, cancellation | ✅ user-reported working |
+| Express **payment** card UI (animation) | ✅ selection-only probe | ❌ requires Wallet hardware | ✅ user-reported working on 2026-10-24 |
 
 Hardware results reported by the author on 2026-10-24, using a Flipper Zero with an
 iPhone 18 Pro and Apple Watch: Express Transit activation and balance reads work for
 Apple Wallet Suica (`0x0003`) and Octopus (`0x8008`) on both devices, and balance
 reads work for a physical Suica card.
 
-In ECP mode, both the iPhone and the Apple Watch **do answer on NFC-A** after the ECP
-frame (the app shows UID/ATQA/SAK and "Device answered (NFC-A)"), confirming the wake
-and the low-level handshake work. Neither device shows the Express payment **animation**,
-which is expected: iOS only paints the committed payment UI once a reader proceeds into
-the EMV payment-application flow, and this app deliberately stops at anticollision and
-never does that (no PPSE/EMV, no card data). The animation is therefore out of scope, not
-a bug. Physical Octopus cards, custom system codes, settings persistence and the negative
+Earlier tests using the generic ECP v1 frame reached NFC-A identification on both
+Apple devices but showed no animation. Those tests stopped at anticollision.
+On 2026-10-24, the user reported that the TfL frame and selection-only exchange
+successfully triggered the Wallet animation. The device, OS version and payment
+network for this follow-up test were not specified.
+Physical Octopus cards, custom system codes, settings persistence and the negative
 cases in the procedure below have not been reported yet.
 
 ## Installation
@@ -142,7 +144,7 @@ the dev and release channels.
 - **Start Polling (Transit)** opens the poll screen in FeliCa mode and starts polling
   straight away.
 - **Express Card (ECP)** opens the poll screen in ECP mode and starts broadcasting the
-  payment/VAS ECP frame on NFC-A straight away.
+  TfL transit ECP frame on NFC-A straight away.
 - **System Code: 0x….** opens the presets `0x0003` and `0x8008`, or *Custom*.
   Custom shows a two-byte hex editor. Any 16-bit value is accepted, including
   wildcards such as `0xFFFF`.
@@ -166,13 +168,13 @@ Bal: 1234 JPY
            [ Stop ]
 ```
 
-- Line 2 shows the phase (*Searching*, *Reading*, *Present*, *Removed*, *Stopped*), the result of
+- Line 2 shows the phase (*Searching*, *Reading* / *Selecting*, *Present*, *Removed*, *Stopped*), the result of
   the most recent Polling command and the number of polls sent.
 - **OK** starts or stops polling. **Back** stops polling and returns to the menu.
 - After the card is removed, its last data stays on screen until another card is detected.
 
 In **Express Card (ECP)** mode the header reads `Express Card  ECP A` and, on a detection,
-the body shows `UID …`, `ATQA …  SAK …` and `Device answered (NFC-A)` instead of the
+the body shows `UID …`, `ATQA …  SAK …` and the selection result instead of the
 FeliCa/balance lines:
 
 ```
@@ -180,7 +182,7 @@ Express Card        ECP A
 Present: OK              #41
 UID 04A2B3C4D5E6F7
 ATQA 0004 SAK 20
-Device answered (NFC-A)
+App selected
            [ Stop ]
 ```
 
@@ -226,9 +228,13 @@ w/o Enc
 ### Express Card (ECP) mode
 
 ```
-ECP (NFC-A)   6A 01 00 00 00            (+ CRC_A)   → not answered
-SENS_REQ      26                                    → ATQA
+ECP (NFC-A)   TfL transit configuration (+ CRC_A)   → not answered
+WUPA          52 (short frame)                      → ATQA
 Anticollision 93/95/97 …                            → UID + SAK
+RATS          E0 80                                → ATS
+SELECT        2PAY.SYS.DDF01                        → directory AIDs
+SELECT        first advertised AID                 → status word
+DESELECT                                           → end ISO-DEP
 ```
 
 - `nfc_config(NfcModePoller, NfcTechIso14443a)`. Each poll appends CRC_A
@@ -236,9 +242,12 @@ Anticollision 93/95/97 …                            → UID + SAK
   `nfc_poller_trx`. Apple devices never answer ECP itself — they answer the regular
   NFC-A poll that follows — so a timeout on the ECP frame is the expected, successful case.
 - Detection reuses the firmware's exported NFC-A primitives
-  (`nfc_iso14443a_poller_trx_short_frame` / `_trx_sdd_frame`) for a SENS_REQ +
+  (`nfc_iso14443a_poller_trx_short_frame` / `_trx_sdd_frame`) for a WUPA +
   anticollision cascade, adapted from the firmware's internal `iso14443_3a_poller_activate`.
-  It stops at SAK — no RATS, no application selection, no card data.
+  Devices advertising ISO-DEP then enter the selection-only exchange in
+  `nfca/emv_select.c`. Each SELECT handles bounded response chaining and wait-time
+  extensions. Unsupported frames or timing limits produce errors; no transaction
+  commands follow selection.
 - The two technologies can't share one loop (the NFC layer binds one technology per run),
   so Transit and Express Card are separate menu entries. Both use the same worker, UI,
   interval and feedback settings. **No custom firmware is required.**
@@ -259,16 +268,16 @@ Anticollision 93/95/97 …                            → UID + SAK
   Express Transit (or Express payment) must be enabled for that card in Wallet, and
   the device may need the right region settings. Waking Express Mode does not mean a
   balance can be read.
-- **ECP mode only wakes and identifies.** A real Apple transit reader also polls
-  NFC-B and sends transit-specific ECP configurations; this app sends only the generic
-  payment/VAS frame on NFC-A, so some Express payment setups may not respond. When one
-  does, the app shows UID/ATQA/SAK and nothing more — payment cards expose no balance,
-  and reading EMV data is deliberately out of scope.
-- **No Express payment animation, by design.** On an iPhone/Apple Watch the device
-  answers on NFC-A after the ECP frame (verified), but iOS does not show the committed
-  Express card animation because that only appears once a reader continues into the EMV
-  payment-application flow. This app stops at anticollision, so the visible card UI is not
-  reached. This is a deliberate scope limit, not a defect.
+- **Express payment animation is experimental.** The
+  [ECP reference](https://github.com/kormax/apple-enhanced-contactless-polling#ecp-and-express-mode-behavior)
+  places the EMV animation after payment application selection. The app attempts
+  that step but cannot observe the phone screen. `App selected` is not an animation
+  guarantee. The documented TfL network mask does not cover every payment network.
+- **Selection has bounded protocol support.** The first advertised application is
+  selected; there is no network picker or fallback to guessed AIDs. Responses are
+  limited to 512 bytes, 24 exchanges per SELECT, and 300 ms per exchange. Outbound
+  chaining, CID/NAD, retransmission and status-word follow-up commands are unsupported.
+  Devices exceeding these limits report an error. Stop is checked between exchanges.
 - **Apple Wallet may not expose the balance service** (transit mode). If the read-only
   service is missing or locked on the device, the app reports `no service` or
   `card err` instead of a value.
@@ -302,7 +311,10 @@ Record the firmware version, the device model and iOS/watchOS version, and the W
 8. **Apple Watch**: repeat steps 6 and 7.
 9. **Express Card (ECP)**: choose *Express Card (ECP)*, hold an iPhone/Watch with an Express
    payment card near the Flipper, and note whether it presents the card and whether the screen
-   shows `UID`, `ATQA`/`SAK` and `Device answered (NFC-A)`. Note whether any Express card animation appears (see Limitations). Try with the screen locked and on.
+   shows `UID`, `ATQA`/`SAK` and a selection result. Record any rejection status word.
+   For `App selected`, separately record whether a card/spinner appears; selection
+   success alone is not animation verification. Try with the screen locked and on,
+   remove/re-present the device, and press Stop during selection to check responsiveness.
 10. **Negative cases**: an unsupported FeliCa card with `0x0003` (expect `Searching: timeout`),
     wildcard `0xFFFF` with RC=None (`System unknown`), balance off (`bal. off`), pulling the
     card away mid-read (`no response` or `invalid data`, followed by `Removed`), and ECP mode
@@ -320,9 +332,11 @@ write to cards, read keys or credentials, or bypass Apple Pay security.
 - Transit (FeliCa) mode only sends Polling (0x00), Request Service (0x02) and
   Read Without Encryption (0x06), and the read targets only services whose
   attributes mark them as read-only and key-free.
-- Express Card (ECP) mode only broadcasts the ECP wake frame and runs NFC-A
-  anticollision to UID/ATQA/SAK. It never selects a payment application (no PPSE/EMV)
-  or reads any payment or cardholder data.
+- Express Card (ECP) mode allows only ISO-DEP activation, SELECT PPSE, SELECT of
+  one advertised payment application, and ISO-DEP flow control/deselection after
+  NFC-A identification. It parses directory AIDs and status words only. It never
+  sends GPO, READ RECORD, GET DATA, GENERATE AC or authentication commands, and
+  never saves or displays selection response bodies.
 
 ## License / credits
 

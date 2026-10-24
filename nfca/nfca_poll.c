@@ -54,9 +54,9 @@ NfcaPollResult nfca_poll_activate(Nfc* nfc, BitBuffer* tx, BitBuffer* rx, Iso144
 
     memset(data, 0, sizeof(Iso14443_3aData));
 
-    /* SENS_REQ (REQA) short frame -> ATQA (2 bytes). */
+    /* WUPA also wakes devices halted after ISO-DEP deselection. */
     NfcError error = nfc_iso14443a_poller_trx_short_frame(
-        nfc, NfcIso14443aShortFrameSensReq, rx, ISO14443_3A_FDT_LISTEN_FC);
+        nfc, NfcIso14443aShortFrameAllReqa, rx, ISO14443_3A_FDT_LISTEN_FC);
     if(error != NfcErrorNone) return nfca_poll_process_error(error);
     if(bit_buffer_get_size_bytes(rx) != sizeof(Iso14443_3aSensResp))
         return NfcaPollResultCollision;

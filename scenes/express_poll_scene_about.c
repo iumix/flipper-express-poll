@@ -11,8 +11,8 @@ static const char about_text[] =
     "when the system is known. Unknown or protected services are reported, "
     "never guessed.\n\n"
     "Express Card (ECP) sends an Apple Enhanced Contactless Polling frame on "
-    "NFC-A to wake an Express payment card, then shows its UID/ATQA/SAK only. "
-    "No card data is read.\n\n"
+    "NFC-A, then selects a payment application to test the Wallet animation. "
+    "Shows selection status; no payment records are read.\n\n"
     "No payments, no writes, no keys.\n"
     "Not affiliated with Apple.";
 

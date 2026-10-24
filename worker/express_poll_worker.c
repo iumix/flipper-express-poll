@@ -7,6 +7,7 @@
 #include <furi.h>
 #include <nfc/nfc.h>
 #include <nfc/helpers/felica_crc.h>
+#include <nfc/helpers/iso14443_crc.h>
 #include <nfc/protocols/felica/felica.h>
 #include <nfc/protocols/iso14443_3a/iso14443_3a.h>
 
@@ -36,6 +37,7 @@ struct ExpressPollWorker {
     ExpressPollWorkerConfig config;
     ExpressPollStatus status; /* Guarded by mutex. */
     uint8_t misses;
+    bool reset_field;
 
     volatile bool running;
     volatile bool stop_requested;
@@ -323,16 +325,63 @@ static ExpressPollResult worker_ecp_result(NfcaPollResult result) {
     return ExpressPollResultTransportError;
 }
 
+static EmvSelectResult worker_emv_exchange(
+    void* context,
+    const uint8_t* tx,
+    size_t tx_len,
+    uint8_t* rx,
+    size_t* rx_len,
+    uint32_t fwt_fc) {
+    ExpressPollWorker* worker = context;
+    if(worker->stop_requested) return EmvSelectCancelled;
+    bit_buffer_copy_bytes(worker->tx, tx, tx_len);
+    iso14443_crc_append(Iso14443CrcTypeA, worker->tx);
+    bit_buffer_reset(worker->rx);
+    NfcError error = nfc_poller_trx(worker->nfc, worker->tx, worker->rx, fwt_fc);
+    if(error == NfcErrorTimeout) return EmvSelectTimeout;
+    if(error != NfcErrorNone) return EmvSelectTransportError;
+    if(!iso14443_crc_check(Iso14443CrcTypeA, worker->rx)) return EmvSelectProtocolError;
+    iso14443_crc_trim(worker->rx);
+    size_t size = bit_buffer_get_size_bytes(worker->rx);
+    if(size > *rx_len) return EmvSelectProtocolError;
+    bit_buffer_write_bytes(worker->rx, rx, size);
+    *rx_len = size;
+    bit_buffer_reset(worker->rx);
+    return EmvSelectOk;
+}
+
+static bool worker_emv_wait(void* context, uint32_t delay_fc) {
+    ExpressPollWorker* worker = context;
+    worker_wait(worker, (delay_fc + 13559U) / 13560U);
+    return !worker->stop_requested;
+}
+
 static void worker_handle_new_nfca(ExpressPollWorker* worker, const Iso14443_3aData* data) {
     worker_lock(worker);
-    worker->status.phase = ExpressPollPhasePresent;
     worker->status.detect_count++;
     worker->status.has_card = true;
     worker->status.card_present = true;
     worker->status.nfca = *data;
+    worker->status.emv_result = EmvSelectNotAttempted;
+    worker->status.emv_status_word = 0;
+    worker->status.phase = ExpressPollPhaseReading;
     worker_unlock(worker);
 
     worker->misses = 0;
+    worker_notify(worker);
+
+    uint16_t status_word = 0;
+    EmvSelectResult result = EmvSelectUnsupported;
+    if(iso14443_3a_supports_iso14443_4(data)) {
+        result = emv_select_run(worker_emv_exchange, worker_emv_wait, worker, &status_word);
+        /* Recover even if ATS/DESELECT failed or the card vanished mid-exchange. */
+        worker->reset_field = true;
+    }
+    worker_lock(worker);
+    worker->status.phase = ExpressPollPhasePresent;
+    worker->status.emv_result = result;
+    worker->status.emv_status_word = status_word;
+    worker_unlock(worker);
     worker_notify(worker);
 }
 
@@ -384,7 +433,12 @@ static NfcCommand worker_nfc_callback(NfcEvent event, void* context) {
             worker_step_felica(worker);
         }
     }
-    return worker->stop_requested ? NfcCommandStop : NfcCommandContinue;
+    if(worker->stop_requested) return NfcCommandStop;
+    if(worker->reset_field) {
+        worker->reset_field = false;
+        return NfcCommandReset;
+    }
+    return NfcCommandContinue;
 }
 
 /* --- Public API ----------------------------------------------------------- */
@@ -425,6 +479,7 @@ void express_poll_worker_start(ExpressPollWorker* worker, const ExpressPollWorke
     worker->config = *config;
     worker->misses = 0;
     worker->stop_requested = false;
+    worker->reset_field = false;
     worker->update_pending = false;
 
     worker_lock(worker);

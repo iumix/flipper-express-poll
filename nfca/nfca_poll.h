@@ -4,11 +4,10 @@
  *
  * Used by the worker to trigger Apple Pay Express for payment / open-loop
  * transit. It broadcasts the ECP frame (unanswered), then runs a standard
- * NFC-A SENS_REQ + anticollision cascade to detect and identify the card the
+ * NFC-A WUPA + anticollision cascade to detect and identify the card the
  * device presents.
  *
- * Read-only on purpose: activation stops at SAK. No RATS/ISO-DEP, no EMV/PPSE
- * selection, no cardholder data. EMV cards expose no balance to a poller.
+ * This helper stops at SAK; the worker then runs the selection-only EMV probe.
  *
  * The firmware's Iso14443_3aPoller is internal and cannot be allocated from an
  * app, so this adapts the exported low-level primitives
@@ -45,10 +44,10 @@ NfcaPollResult nfca_poll_send_ecp(
     size_t frame_len);
 
 /**
- * @brief Run NFC-A activation (SENS_REQ + anticollision) and fill @p data.
+ * @brief Run NFC-A activation (WUPA + anticollision) and fill @p data.
  *
  * @return NfcaPollResultOk with UID/ATQA/SAK on success; NfcaPollResultTimeout
- *         when nothing answers SENS_REQ; otherwise a collision/error code.
+ *         when nothing answers WUPA; otherwise a collision/error code.
  *
  * Must only be called inside the Nfc poller callback.
  */

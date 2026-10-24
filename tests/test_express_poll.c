@@ -382,16 +382,17 @@ static void test_balance_format_edges(void) {
 /* --- ECP ----------------------------------------------------------------- */
 
 static void test_ecp_frame(void) {
-    uint8_t frame[8];
+    uint8_t frame[ECP_FRAME_PAYMENT_LEN];
 
-    /* Published generic payment/VAS ECP v1 frame, pre-CRC: 6A 01 00 00 00. */
-    static const uint8_t payment[] = {0x6A, 0x01, 0x00, 0x00, 0x00};
+    /* Published TfL capture, with ECP v2 header/config and without CRC. */
+    static const uint8_t payment[] = {
+        0x6A, 0x02, 0xC8, 0x01, 0x00, 0x03, 0x00, 0x02, 0x79, 0, 0, 0, 0};
     CHECK(ecp_frame_build_payment(frame, sizeof(frame)) == ECP_FRAME_PAYMENT_LEN);
     CHECK(ECP_FRAME_PAYMENT_LEN == sizeof(payment));
     CHECK(memcmp(frame, payment, sizeof(payment)) == 0);
 
     /* Buffer-size guards. */
-    CHECK(ecp_frame_build_payment(frame, 4) == 0);
+    CHECK(ecp_frame_build_payment(frame, ECP_FRAME_PAYMENT_LEN - 1) == 0);
     CHECK(ecp_frame_build_payment(NULL, sizeof(frame)) == 0);
 }
 
