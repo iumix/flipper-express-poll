@@ -152,7 +152,8 @@ static void poll_view_draw_callback(Canvas* canvas, void* model_ptr) {
             status->nfca.atqa[0],
             status->nfca.sak);
         canvas_draw_str(canvas, 0, 39, line);
-        canvas_draw_str(canvas, 0, 48, "Express card presented");
+        /* We only completed anticollision; no app selection, so no committed UI. */
+        canvas_draw_str(canvas, 0, 48, "Device answered (NFC-A)");
     } else if(status->has_card) {
         char hex[FELICA_FRAME_IDM_LEN * 2 + 1] = {0};
         poll_view_hex(status->card.idm, FELICA_FRAME_IDM_LEN, hex, sizeof(hex));

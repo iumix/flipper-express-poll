@@ -45,7 +45,7 @@ the public reverse-engineering at
 - Broadcasts the generic payment/VAS ECP v1 frame `6A 01 00 00 00` (CRC_A appended by the
   radio) on NFC-A, at the same start/stop and non-blocking-UI model as the transit mode
 - Wakes the default Express payment card so the device presents it, then runs a standard
-  NFC-A SENS_REQ + anticollision and shows **UID, ATQA, SAK** and "Express card presented"
+  NFC-A SENS_REQ + anticollision and shows **UID, ATQA, SAK** and "Device answered (NFC-A)"
 - **Stops there.** No RATS/ISO-DEP, no EMV/PPSE selection, no PAN or cardholder data. EMV
   payment cards expose no balance to a poller, so there is nothing balance-like to show
 
@@ -66,16 +66,22 @@ the public reverse-engineering at
 | Balance read from Apple Wallet Suica / Octopus | ✅ | ❌ | ✅ iPhone 18 Pro + Apple Watch |
 | Balance read from physical Suica / Octopus cards | ✅ | ❌ | ✅ physical Suica · ⏳ physical Octopus |
 | ECP frame construction (`6A 01 00 00 00`) | ✅ | ✅ byte-exact against the published frame | – |
-| ECP broadcast + NFC-A activation (UID/ATQA/SAK) | ✅ | ❌ (needs the Flipper NFC HAL) | ⏳ pending |
-| Waking Express **payment** card via ECP on iPhone / Apple Watch | ✅ | ❌ | ⏳ pending |
+| ECP broadcast + NFC-A activation (UID/ATQA/SAK) | ✅ | ❌ (needs the Flipper NFC HAL) | ✅ iPhone 18 Pro + Apple Watch answer on NFC-A |
+| Committed Express **payment** card UI (animation) via ECP | ⬜ out of scope | – | ❌ no animation (expected: see note) |
 
 Hardware results reported by the author on 2026-10-24, using a Flipper Zero with an
 iPhone 18 Pro and Apple Watch: Express Transit activation and balance reads work for
 Apple Wallet Suica (`0x0003`) and Octopus (`0x8008`) on both devices, and balance
-reads work for a physical Suica card. The ECP (Express payment) mode, physical
-Octopus cards, custom system codes,
-settings persistence and the negative cases in the procedure below have not
-been reported yet.
+reads work for a physical Suica card.
+
+In ECP mode, both the iPhone and the Apple Watch **do answer on NFC-A** after the ECP
+frame (the app shows UID/ATQA/SAK and "Device answered (NFC-A)"), confirming the wake
+and the low-level handshake work. Neither device shows the Express payment **animation**,
+which is expected: iOS only paints the committed payment UI once a reader proceeds into
+the EMV payment-application flow, and this app deliberately stops at anticollision and
+never does that (no PPSE/EMV, no card data). The animation is therefore out of scope, not
+a bug. Physical Octopus cards, custom system codes, settings persistence and the negative
+cases in the procedure below have not been reported yet.
 
 ## Installation
 
@@ -166,7 +172,7 @@ Bal: 1234 JPY
 - After the card is removed, its last data stays on screen until another card is detected.
 
 In **Express Card (ECP)** mode the header reads `Express Card  ECP A` and, on a detection,
-the body shows `UID …`, `ATQA …  SAK …` and `Express card presented` instead of the
+the body shows `UID …`, `ATQA …  SAK …` and `Device answered (NFC-A)` instead of the
 FeliCa/balance lines:
 
 ```
@@ -174,7 +180,7 @@ Express Card        ECP A
 Present: OK              #41
 UID 04A2B3C4D5E6F7
 ATQA 0004 SAK 20
-Express card presented
+Device answered (NFC-A)
            [ Stop ]
 ```
 
@@ -258,6 +264,11 @@ Anticollision 93/95/97 …                            → UID + SAK
   payment/VAS frame on NFC-A, so some Express payment setups may not respond. When one
   does, the app shows UID/ATQA/SAK and nothing more — payment cards expose no balance,
   and reading EMV data is deliberately out of scope.
+- **No Express payment animation, by design.** On an iPhone/Apple Watch the device
+  answers on NFC-A after the ECP frame (verified), but iOS does not show the committed
+  Express card animation because that only appears once a reader continues into the EMV
+  payment-application flow. This app stops at anticollision, so the visible card UI is not
+  reached. This is a deliberate scope limit, not a defect.
 - **Apple Wallet may not expose the balance service** (transit mode). If the read-only
   service is missing or locked on the device, the app reports `no service` or
   `card err` instead of a value.
@@ -291,7 +302,7 @@ Record the firmware version, the device model and iOS/watchOS version, and the W
 8. **Apple Watch**: repeat steps 6 and 7.
 9. **Express Card (ECP)**: choose *Express Card (ECP)*, hold an iPhone/Watch with an Express
    payment card near the Flipper, and note whether it presents the card and whether the screen
-   shows `UID`, `ATQA`/`SAK` and `Express card presented`. Try with the screen locked and on.
+   shows `UID`, `ATQA`/`SAK` and `Device answered (NFC-A)`. Note whether any Express card animation appears (see Limitations). Try with the screen locked and on.
 10. **Negative cases**: an unsupported FeliCa card with `0x0003` (expect `Searching: timeout`),
     wildcard `0xFFFF` with RC=None (`System unknown`), balance off (`bal. off`), pulling the
     card away mid-read (`no response` or `invalid data`, followed by `Removed`), and ECP mode
