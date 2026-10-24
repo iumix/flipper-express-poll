@@ -141,13 +141,13 @@ the dev and release channels.
 
 **Main menu**
 
-- **Start Polling (Transit)** opens the poll screen in FeliCa mode and starts polling
-  straight away.
-- **Express Card (ECP)** opens the poll screen in ECP mode and starts broadcasting the
+- **FeliCa Polling** opens a submenu:
+  - *Start Polling* opens the poll screen in FeliCa mode and starts polling straight away.
+  - *System Code: 0x….* opens the presets `0x0003` and `0x8008`, or *Custom*.
+    Custom shows a two-byte hex editor. Any 16-bit value is accepted, including
+    wildcards such as `0xFFFF`.
+- **ECP Polling** opens the poll screen in ECP mode and starts broadcasting the
   TfL transit ECP frame on NFC-A straight away.
-- **System Code: 0x….** opens the presets `0x0003` and `0x8008`, or *Custom*.
-  Custom shows a two-byte hex editor. Any 16-bit value is accepted, including
-  wildcards such as `0xFFFF`.
 - **Settings**
   - *Poll interval*: 50 / 100 / 250 / 500 / 1000 ms between Polling commands (default 100 ms,
     the same as the reference)

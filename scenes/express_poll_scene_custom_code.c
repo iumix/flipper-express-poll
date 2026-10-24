@@ -36,7 +36,7 @@ bool express_poll_scene_custom_code_on_event(void* context, SceneManagerEvent ev
     app->settings.system_code = code;
     express_poll_app_save_settings(app);
 
-    scene_manager_search_and_switch_to_previous_scene(app->scene_manager, ExpressPollSceneStart);
+    scene_manager_search_and_switch_to_previous_scene(app->scene_manager, ExpressPollSceneFelica);
     return true;
 }
 

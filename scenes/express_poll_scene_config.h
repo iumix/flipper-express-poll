@@ -1,4 +1,5 @@
 ADD_SCENE(express_poll, start, Start)
+ADD_SCENE(express_poll, felica, Felica)
 ADD_SCENE(express_poll, poll, Poll)
 ADD_SCENE(express_poll, system_code, SystemCode)
 ADD_SCENE(express_poll, custom_code, CustomCode)

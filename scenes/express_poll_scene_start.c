@@ -1,12 +1,8 @@
 #include "../express_poll_app_i.h"
-#include "../felica/felica_systems.h"
-
-#include <stdio.h>
 
 typedef enum {
-    StartIndexPoll,
+    StartIndexFelica,
     StartIndexEcp,
-    StartIndexSystemCode,
     StartIndexSettings,
     StartIndexAbout,
 } StartIndex;
@@ -20,26 +16,14 @@ void express_poll_scene_start_on_enter(void* context) {
     ExpressPollApp* app = context;
     Submenu* submenu = app->submenu;
 
-    char code[FELICA_SYSTEM_CODE_STR_SIZE];
-    felica_system_code_format(app->settings.system_code, code);
-    /* Submenu copies the label, so a stack buffer is fine. */
-    char label[32];
-    snprintf(label, sizeof(label), "System Code: %s", code);
-
     submenu_add_item(
         submenu,
-        "Start Polling (Transit)",
-        StartIndexPoll,
+        "FeliCa Polling",
+        StartIndexFelica,
         express_poll_scene_start_submenu_callback,
         app);
     submenu_add_item(
-        submenu,
-        "Express Card (ECP)",
-        StartIndexEcp,
-        express_poll_scene_start_submenu_callback,
-        app);
-    submenu_add_item(
-        submenu, label, StartIndexSystemCode, express_poll_scene_start_submenu_callback, app);
+        submenu, "ECP Polling", StartIndexEcp, express_poll_scene_start_submenu_callback, app);
     submenu_add_item(
         submenu, "Settings", StartIndexSettings, express_poll_scene_start_submenu_callback, app);
     submenu_add_item(
@@ -55,16 +39,14 @@ bool express_poll_scene_start_on_event(void* context, SceneManagerEvent event) {
     if(event.type != SceneManagerEventTypeCustom) return false;
 
     static const ExpressPollScene next[] = {
-        [StartIndexPoll] = ExpressPollScenePoll,
+        [StartIndexFelica] = ExpressPollSceneFelica,
         [StartIndexEcp] = ExpressPollScenePoll,
-        [StartIndexSystemCode] = ExpressPollSceneSystemCode,
         [StartIndexSettings] = ExpressPollSceneSettings,
         [StartIndexAbout] = ExpressPollSceneAbout,
     };
     if(event.event >= sizeof(next) / sizeof(next[0])) return false;
 
     /* The Poll scene reads poll_tech to decide which technology to start. */
-    if(event.event == StartIndexPoll) app->poll_tech = ExpressPollTechFelica;
     if(event.event == StartIndexEcp) app->poll_tech = ExpressPollTechEcp;
 
     scene_manager_set_scene_state(app->scene_manager, ExpressPollSceneStart, event.event);
