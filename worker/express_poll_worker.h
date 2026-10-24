@@ -10,10 +10,17 @@
 #include "../balance/balance.h"
 #include "../felica/felica_frames.h"
 
+#include <lib/nfc/protocols/iso14443_3a/iso14443_3a.h>
+
 #include <stdbool.h>
 #include <stdint.h>
 
 typedef struct ExpressPollWorker ExpressPollWorker;
+
+typedef enum {
+    ExpressPollTechFelica, /**< NFC-F Polling: Express Transit (Suica, Octopus). */
+    ExpressPollTechEcp, /**< NFC-A ECP broadcast: Express payment / open-loop transit. */
+} ExpressPollTech;
 
 typedef enum {
     ExpressPollPhaseIdle,
@@ -43,30 +50,36 @@ typedef enum {
 } ExpressPollBalanceState;
 
 typedef struct {
-    uint16_t system_code; /**< Code sent in Polling. */
-    uint8_t request_code;
+    ExpressPollTech tech;
+    uint16_t system_code; /**< FeliCa: code sent in Polling. Ignored for ECP. */
+    uint8_t request_code; /**< FeliCa only. */
     uint32_t interval_ms;
-    bool read_balance;
+    bool read_balance; /**< FeliCa only. */
 } ExpressPollWorkerConfig;
 
 typedef struct {
+    ExpressPollTech tech; /**< Which technology produced this status. */
     ExpressPollPhase phase;
-    uint16_t polled_system_code;
+    uint16_t polled_system_code; /**< FeliCa only. */
     uint32_t poll_count;
     uint32_t detect_count; /**< Increments on each new card/device arrival. */
     ExpressPollResult last_result;
 
-    bool has_card; /**< card holds data from the latest detection. */
+    bool has_card; /**< A card/device was detected (card or nfca holds its data). */
     bool card_present; /**< That card still answers presence checks. */
+
+    /* FeliCa (ExpressPollTechFelica). */
     FelicaPollingResponse card;
     bool identified; /**< identified_system_code is meaningful. */
     uint16_t identified_system_code;
-
     ExpressPollBalanceState balance_state;
     const BalanceDecoder* decoder;
     int32_t balance;
     uint8_t status1;
     uint8_t status2;
+
+    /* ECP / NFC-A (ExpressPollTechEcp). */
+    Iso14443_3aData nfca;
 } ExpressPollStatus;
 
 /** Called from the NFC thread when status changed. Must not block. */

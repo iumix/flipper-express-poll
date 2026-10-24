@@ -6,6 +6,7 @@ CFLAGS ?= -std=c11 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,un
 LDFLAGS ?= -fsanitize=address,undefined
 
 SRCS = test_express_poll.c \
+       ../nfca/ecp_frames.c \
        ../felica/felica_frames.c \
        ../felica/felica_systems.c \
        ../balance/balance.c \
@@ -19,7 +20,7 @@ BIN = $(BUILD)/test_express_poll
 test: $(BIN)
 	./$(BIN)
 
-$(BIN): $(SRCS) $(wildcard ../felica/*.h ../balance/*.h)
+$(BIN): $(SRCS) $(wildcard ../felica/*.h ../balance/*.h ../nfca/*.h)
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(SRCS) $(LDFLAGS) -o $@
 

@@ -6,6 +6,7 @@
 #include "../balance/balance.h"
 #include "../felica/felica_frames.h"
 #include "../felica/felica_systems.h"
+#include "../nfca/ecp_frames.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -378,6 +379,22 @@ static void test_balance_format_edges(void) {
     CHECK(strcmp(text, "-214748364.8 HKD") == 0);
 }
 
+/* --- ECP ----------------------------------------------------------------- */
+
+static void test_ecp_frame(void) {
+    uint8_t frame[8];
+
+    /* Published generic payment/VAS ECP v1 frame, pre-CRC: 6A 01 00 00 00. */
+    static const uint8_t payment[] = {0x6A, 0x01, 0x00, 0x00, 0x00};
+    CHECK(ecp_frame_build_payment(frame, sizeof(frame)) == ECP_FRAME_PAYMENT_LEN);
+    CHECK(ECP_FRAME_PAYMENT_LEN == sizeof(payment));
+    CHECK(memcmp(frame, payment, sizeof(payment)) == 0);
+
+    /* Buffer-size guards. */
+    CHECK(ecp_frame_build_payment(frame, 4) == 0);
+    CHECK(ecp_frame_build_payment(NULL, sizeof(frame)) == 0);
+}
+
 int main(void) {
     test_build_polling();
     test_build_read();
@@ -391,6 +408,7 @@ int main(void) {
     test_suica_balance();
     test_octopus_balance();
     test_balance_format_edges();
+    test_ecp_frame();
 
     if(failures) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);

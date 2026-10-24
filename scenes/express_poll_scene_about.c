@@ -10,6 +10,9 @@ static const char about_text[] =
     "Balance is read with read-only commands (Read Without Encryption) "
     "when the system is known. Unknown or protected services are reported, "
     "never guessed.\n\n"
+    "Express Card (ECP) sends an Apple Enhanced Contactless Polling frame on "
+    "NFC-A to wake an Express payment card, then shows its UID/ATQA/SAK only. "
+    "No card data is read.\n\n"
     "No payments, no writes, no keys.\n"
     "Not affiliated with Apple.";
 

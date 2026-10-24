@@ -114,15 +114,23 @@ static void poll_view_draw_callback(Canvas* canvas, void* model_ptr) {
     const ExpressPollStatus* status = &model->status;
     char line[32];
 
+    const bool ecp = status->tech == ExpressPollTechEcp;
+
     canvas_clear(canvas);
 
-    /* Header: polled system code and its name. */
+    /* Header line. */
     canvas_set_font(canvas, FontPrimary);
-    felica_system_code_format(status->polled_system_code, line);
-    canvas_draw_str(canvas, 0, 9, line);
-    const char* name = felica_system_name(status->polled_system_code);
-    canvas_set_font(canvas, FontSecondary);
-    if(name) canvas_draw_str(canvas, 42, 9, name);
+    if(ecp) {
+        canvas_draw_str(canvas, 0, 9, "Express Card");
+        canvas_set_font(canvas, FontSecondary);
+        canvas_draw_str(canvas, 76, 9, "ECP A");
+    } else {
+        felica_system_code_format(status->polled_system_code, line);
+        canvas_draw_str(canvas, 0, 9, line);
+        const char* name = felica_system_name(status->polled_system_code);
+        canvas_set_font(canvas, FontSecondary);
+        if(name) canvas_draw_str(canvas, 42, 9, name);
+    }
 
     poll_view_status_line(model, line, sizeof(line));
     canvas_draw_str(canvas, 0, 20, line);
@@ -131,7 +139,21 @@ static void poll_view_draw_callback(Canvas* canvas, void* model_ptr) {
         canvas_draw_str_aligned(canvas, 128, 20, AlignRight, AlignBottom, line);
     }
 
-    if(status->has_card) {
+    if(status->has_card && ecp) {
+        char hex[ISO14443_3A_MAX_UID_SIZE * 2 + 1] = {0};
+        poll_view_hex(status->nfca.uid, status->nfca.uid_len, hex, sizeof(hex));
+        snprintf(line, sizeof(line), "UID %s", hex);
+        canvas_draw_str(canvas, 0, 30, line);
+        snprintf(
+            line,
+            sizeof(line),
+            "ATQA %02X%02X SAK %02X",
+            status->nfca.atqa[1],
+            status->nfca.atqa[0],
+            status->nfca.sak);
+        canvas_draw_str(canvas, 0, 39, line);
+        canvas_draw_str(canvas, 0, 48, "Express card presented");
+    } else if(status->has_card) {
         char hex[FELICA_FRAME_IDM_LEN * 2 + 1] = {0};
         poll_view_hex(status->card.idm, FELICA_FRAME_IDM_LEN, hex, sizeof(hex));
         snprintf(line, sizeof(line), "IDm %s", hex);
@@ -143,7 +165,7 @@ static void poll_view_draw_callback(Canvas* canvas, void* model_ptr) {
         canvas_draw_str(canvas, 0, 48, line);
     } else if(model->running) {
         canvas_draw_str(canvas, 0, 32, "Hold iPhone, Watch or");
-        canvas_draw_str(canvas, 0, 41, "card near the back.");
+        canvas_draw_str(canvas, 0, 41, ecp ? "payment card near back." : "card near the back.");
     } else {
         canvas_draw_str(canvas, 0, 36, "Press OK to start polling.");
     }

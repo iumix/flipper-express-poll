@@ -49,6 +49,7 @@ typedef struct {
     ExpressPollWorker* worker;
     ExpressPollSettings settings;
 
+    ExpressPollTech poll_tech; /**< Which technology the Poll scene should start. */
     uint8_t code_input[2]; /**< Big-endian system code being edited. */
     uint32_t seen_detect_count; /**< For detection feedback on the GUI thread. */
 } ExpressPollApp;
