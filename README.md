@@ -34,20 +34,24 @@ It is a Flipper port of the PN532/libnfc tools in
 | Item | Implemented | Automated tests | Physical hardware |
 |---|---|---|---|
 | `.fap` builds (dev SDK API 87.0, release 1.5.1 API 88.2), zero warnings | ✅ | ✅ `ufbt` + `APPCHK` | – |
-| Polling frame construction (`0x0003`, `0x8008`, custom, RC, TSN) | ✅ | ✅ byte-exact against the reference | ⏳ pending |
-| SENSF_RES parsing (IDm, PMm, optional system code, malformed frames) | ✅ | ✅ | ⏳ pending |
-| Request Service / Read Without Encryption frames and parsing | ✅ | ✅ byte-exact against the reference | ⏳ pending |
-| PMm-derived response timeouts | ✅ | ✅ | ⏳ pending |
-| Suica / Octopus balance decoding and formatting | ✅ | ✅ | ⏳ pending |
+| Polling frame construction (`0x0003`, `0x8008`, custom, RC, TSN) | ✅ | ✅ byte-exact against the reference | ✅ `0x0003`, `0x8008` · ⏳ custom codes |
+| SENSF_RES parsing (IDm, PMm, optional system code, malformed frames) | ✅ | ✅ | ✅ |
+| Request Service / Read Without Encryption frames and parsing | ✅ | ✅ byte-exact against the reference | ✅ |
+| PMm-derived response timeouts | ✅ | ✅ | ✅ (iPhone and physical Suica) |
+| Suica / Octopus balance decoding and formatting | ✅ | ✅ | ✅ |
 | System code hex parse/format, wildcard detection | ✅ | ✅ (all 65,536 values round-trip) | – |
 | Settings persistence across restarts | ✅ | ❌ (needs the Flipper storage API) | ⏳ pending |
 | Start/stop, non-blocking UI, safe shutdown | ✅ | ❌ | ⏳ pending |
-| Waking Apple Pay Express Mode on iPhone / Apple Watch | ✅ (code path) | ❌ | ⏳ **not yet verified** |
-| Balance read from Apple Wallet Suica / Octopus | ✅ (code path) | ❌ | ⏳ **not yet verified** |
-| Balance read from physical Suica / Octopus cards | ✅ (code path) | ❌ | ⏳ pending |
+| Waking Apple Pay Express Mode on iPhone / Apple Watch | ✅ | ❌ | ✅ iPhone 18 Pro: Suica `0x0003`, Octopus `0x8008` · ⏳ Apple Watch |
+| Balance read from Apple Wallet Suica / Octopus | ✅ | ❌ | ✅ iPhone 18 Pro: Suica and Octopus · ⏳ Apple Watch |
+| Balance read from physical Suica / Octopus cards | ✅ | ❌ | ✅ physical Suica · ⏳ physical Octopus |
 
-No feature has been tested on a physical Flipper Zero yet. Until it has, this
-README makes **no claim** that Express Mode activation works.
+Hardware results reported by the author on 2026-10-24, using a Flipper Zero
+and an iPhone 18 Pro: Express Mode activation and balance reads work for Apple
+Wallet Suica (`0x0003`) and Octopus (`0x8008`), and balance reads work for a
+physical Suica card. Apple Watch, physical Octopus cards, custom system codes,
+settings persistence and the negative cases in the procedure below have not
+been reported yet.
 
 ## Installation
 
