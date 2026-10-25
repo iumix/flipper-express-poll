@@ -1,7 +1,8 @@
 # AGENTS.md
 
 Guidance for coding agents and contributors working on **Apple Pay Express Poll**,
-a Flipper Zero external app (`.fap`) by iumix. User-facing docs are in `README.md`.
+a Flipper Zero external app (`.fap`). User-facing docs are in `README.md`; build,
+protocol and hardware-test details are in `TECHNICAL.md`.
 
 ## Purpose and hard rules
 
@@ -155,5 +156,4 @@ those exclusions so host-only code is never linked into the `.fap`.
 
 - Run `ufbt` (no warnings) and `make -C tests` before committing.
 - Hardware-dependent behaviour (Express Mode, real reads, timing, persistence) can
-  only be verified on a device. Follow the procedure in `README.md` and update its
-  status table with what was actually observed.
+  only be verified on a device. Follow the checklist in `TECHNICAL.md`.
