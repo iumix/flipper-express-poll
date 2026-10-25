@@ -80,3 +80,10 @@ Building, protocol details and the hardware test checklist are in
 
 Thanks to [kormax/apple-enhanced-contactless-polling](https://github.com/kormax/apple-enhanced-contactless-polling)
 for the reverse-engineering work behind the base ECP frame. Please give the source repo a read.
+
+The FeliCa polling and balance layouts come from
+[iumix/express-poll](https://github.com/iumix/express-poll).
+
+## License
+
+[GPL-3.0](LICENSE).

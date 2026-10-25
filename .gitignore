@@ -17,9 +17,5 @@ tests/build/
 __pycache__/
 *.pyc
 
-# Reference PN532 implementation, a separate repository:
-# https://github.com/iumix/transit-polling
-transit-polling/
-
 # OS files
 .DS_Store

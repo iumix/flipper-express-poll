@@ -3,7 +3,7 @@
 /*
  * Octopus (system 0x8008), purse service 0x0117 block 0.
  *
- * Layout from transit-polling/src/octopus_balance.c: bytes 0..3 hold a
+ * Layout: bytes 0..3 hold a
  * big-endian value in units of HK$0.1 with a fixed offset of 500 (HK$50)
  * for cards issued since 2017-10-01, which includes Apple Pay Octopus. Older
  * physical cards used an offset of 350 and are not distinguished here.

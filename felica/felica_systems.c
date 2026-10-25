@@ -7,7 +7,7 @@ typedef struct {
     const char* name;
 } FelicaSystemName;
 
-/* Names taken from the transit-polling reference tables. Short labels for 128px. */
+/* Short labels so names fit the 128px screen. */
 static const FelicaSystemName felica_system_names[] = {
     {0x0003, "Suica/ICOCA/PASMO"},
     {0x8008, "Octopus"},

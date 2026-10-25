@@ -23,7 +23,7 @@ These rules are not negotiable:
   log, display or persist payment/cardholder data. ISO-DEP flow control and
   deselection are allowed; all exchanges must be bounded and cancellable.
 - **No invented decoders.** Add a balance layout only if it comes from a verified
-  source (the reference implementation, a public spec, or a documented hardware
+  source (the PN532 reference implementation, a public spec, or a documented hardware
   dump). Never show a value you cannot justify. Report errors instead.
 - **No simulated data.** No fake responses, hardcoded balances or placeholder polling.
 - **No payment features**: no payment transactions, terminal transaction processing,
@@ -50,7 +50,6 @@ views/poll_view.[ch]            Custom View for the poll screen
 scenes/                         One file per scene; express_poll_scene_config.h lists them
 tests/                          Host unit tests for the PURE modules (Makefile, ASan/UBSan)
 .github/workflows/build.yml     CI: host tests + ufbt builds for the dev and release channels
-transit-polling/                (git-ignored) separate PN532 reference repo, if checked out here
 ```
 
 "PURE" files must not include any Flipper header. Use only the C standard
@@ -95,6 +94,10 @@ library, because they are compiled on the host by `tests/Makefile`.
   `nfc_stop()` while joining, so the NFC thread must never wait on a full queue.
   Never touch views from the NFC thread. Detection feedback (LED/vibro) runs
   on the GUI thread when `detect_count` changes.
+- **Reference implementation:** the PN532 version is a separate repository,
+  [iumix/express-poll](https://github.com/iumix/express-poll), checked out next to
+  this project at `../express-poll`. Do not check it out inside this directory:
+  `ufbt` would compile its C files into the `.fap`.
 - **NFC ownership:** `nfc_alloc()` acquires the NFC HAL. The worker allocates it on
   start and frees it on stop, so the hardware is only held while polling.
 
@@ -127,19 +130,17 @@ ufbt cli             # serial console on the device; `log debug` shows FURI_LOG_
 
 ### Formatting
 
-The code follows the firmware's `.clang-format`. **Do not run `ufbt format` while
-`transit-polling/` is checked out inside the project.** It reformats every C file
-under the app directory, including that separate repository. Run clang-format
-from the toolchain on the project's own files instead:
+The code follows the firmware's `.clang-format`. Run clang-format from the toolchain
+on the project's own files:
 
 ```sh
 CF=$(ls ~/.ufbt/toolchain/*/bin/clang-format | head -1)
-$CF -i --style=file *.c *.h felica/*.[ch] balance/*.[ch] settings/*.[ch] \
+$CF -i --style=file *.c *.h felica/*.[ch] nfca/*.[ch] balance/*.[ch] settings/*.[ch] \
     worker/*.[ch] views/*.[ch] scenes/*.[ch] tests/*.c
 ```
 
-`application.fam` excludes `tests` and `transit-polling` from `sources`. Keep
-those exclusions so host-only code is never linked into the `.fap`.
+`application.fam` excludes `tests` from `sources`. Keep that exclusion so
+host-only code is never linked into the `.fap`.
 
 ## Conventions
 

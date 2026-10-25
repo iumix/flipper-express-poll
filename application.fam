@@ -7,8 +7,8 @@ App(
     entry_point="express_poll_app",
     requires=["gui", "storage", "notification"],
     stack_size=4 * 1024,
-    # Host unit tests and the PN532 reference checkout are not part of the .fap
-    sources=["*.c", "!tests", "!transit-polling"],
+    # Host unit tests are not part of the .fap
+    sources=["*.c", "!tests"],
     fap_category="NFC",
     fap_version="0.1",
     fap_icon="express_poll.png",  # 10x10 1-bit PNG

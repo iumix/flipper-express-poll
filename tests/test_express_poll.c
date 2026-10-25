@@ -32,12 +32,12 @@ static const uint8_t test_pmm[8] = {0x10, 0x0B, 0x4B, 0x42, 0x84, 0x85, 0xD0, 0x
 static void test_build_polling(void) {
     uint8_t frame[8];
 
-    /* Matches transit-polling sensf_req_0003 with the LEN byte prepended. */
+    /* Polling 0x0003 with RC=0x01 (request system code). */
     static const uint8_t suica[] = {0x06, 0x00, 0x00, 0x03, 0x01, 0x00};
     CHECK(felica_frame_build_polling(frame, sizeof(frame), 0x0003, 0x01, 0x00) == 6);
     CHECK(memcmp(frame, suica, sizeof(suica)) == 0);
 
-    /* Matches transit-polling sensf_req_8008. */
+    /* Polling 0x8008 with RC=0x01. */
     static const uint8_t octopus[] = {0x06, 0x00, 0x80, 0x08, 0x01, 0x00};
     CHECK(felica_frame_build_polling(frame, sizeof(frame), 0x8008, 0x01, 0x00) == 6);
     CHECK(memcmp(frame, octopus, sizeof(octopus)) == 0);
@@ -53,13 +53,13 @@ static void test_build_polling(void) {
 static void test_build_read(void) {
     uint8_t frame[20];
 
-    /* Byte-for-byte the read_cmd of transit-polling/src/suica_balance.c. */
+    /* Read Without Encryption: Suica service 0x008B, block 0. */
     uint8_t suica[16] = {0x10, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0x01, 0x8B, 0x00, 0x01, 0x80, 0x00};
     memcpy(suica + 2, test_idm, 8);
     CHECK(felica_frame_build_read_one_block(frame, sizeof(frame), test_idm, 0x008B, 0) == 16);
     CHECK(memcmp(frame, suica, sizeof(suica)) == 0);
 
-    /* Byte-for-byte the read_cmd of transit-polling/src/octopus_balance.c. */
+    /* Read Without Encryption: Octopus service 0x0117, block 0. */
     uint8_t octopus[16] = {0x10, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0x01, 0x17, 0x01, 0x01, 0x80, 0x00};
     memcpy(octopus + 2, test_idm, 8);
     CHECK(felica_frame_build_read_one_block(frame, sizeof(frame), test_idm, 0x0117, 0) == 16);
@@ -281,7 +281,7 @@ static void test_decoder_table(void) {
     CHECK(balance_decoder_find(0xFE00) == NULL);
     CHECK(balance_decoder_find(0xFFFF) == NULL);
 
-    /* Same services as the reference implementation. */
+    /* Balance service and block for each decoder. */
     CHECK(suica->service_code == 0x008B && suica->block_number == 0);
     CHECK(octopus->service_code == 0x0117 && octopus->block_number == 0);
 
