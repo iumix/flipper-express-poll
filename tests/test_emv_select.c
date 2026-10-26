@@ -25,7 +25,7 @@ typedef struct {
     uint8_t pcbs[32];
 } Script;
 
-static EmvSelectResult exchange(
+static IsoDepResult exchange(
     void* context,
     const uint8_t* tx,
     size_t tx_len,
@@ -34,7 +34,7 @@ static EmvSelectResult exchange(
     uint32_t fwt) {
     Script* s = context;
     assert(fwt > 0 && fwt <= 4068000);
-    if(s->step == s->cancel_at) return EmvSelectCancelled;
+    if(s->step == s->cancel_at) return IsoDepCancelled;
     assert(s->step < s->count);
     s->pcbs[s->step] = tx[0];
     if((tx[0] & 0xFE) == 2) {
@@ -51,7 +51,7 @@ static EmvSelectResult exchange(
     *rx_len = s->lengths[s->step];
     memcpy(rx, s->replies[s->step], *rx_len);
     s->step++;
-    return EmvSelectOk;
+    return IsoDepOk;
 }
 
 static bool wait_guard(void* context, uint32_t fc) {
@@ -220,15 +220,31 @@ int main(void) {
     s.lengths[2] = 1;
     expect(&s, EmvSelectProtocolError, 0);
 
-    /* Legal timing values that exceed the app's bound must not reach transport. */
+    /* A legal FWT beyond the app's bound is capped (exchange asserts the cap). */
     const uint8_t slow_ats[] = {3, 0x28, 0xE0};
     s = normal();
     s.replies[0] = slow_ats;
     s.lengths[0] = sizeof(slow_ats);
+    expect(&s, EmvSelectOk, 0x9000);
+    /* A guard time beyond the bound is refused before any APDU. */
+    const uint8_t slow_sfgt[] = {3, 0x28, 0x0E};
+    s = normal();
+    s.replies[0] = slow_sfgt;
+    s.lengths[0] = sizeof(slow_sfgt);
     s.replies[1] = deselected;
     s.lengths[1] = 1;
     expect(&s, EmvSelectUnsupported, 0);
     assert(s.selects == 0);
+    /* FSC 16 cannot carry SELECT PPSE without outbound chaining: unsupported, not sent. */
+    const uint8_t small_fsc[] = {2, 0x00};
+    s = normal();
+    s.replies[0] = small_fsc;
+    s.lengths[0] = sizeof(small_fsc);
+    s.replies[1] = deselected;
+    s.lengths[1] = 1;
+    s.count = 2;
+    expect(&s, EmvSelectUnsupported, 0);
+    assert(s.selects == 0 && s.step == 2);
 
     uint8_t oversized[254] = {0x12};
     uint8_t oversized_next[254] = {0x13};

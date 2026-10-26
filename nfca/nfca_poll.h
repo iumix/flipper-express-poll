@@ -2,12 +2,13 @@
  * @file nfca_poll.h
  * @brief ECP broadcast plus minimal NFC-A (ISO14443-3A) activation.
  *
- * Used by the worker to trigger Apple Pay Express for payment / open-loop
- * transit. It broadcasts the ECP frame (unanswered), then runs a standard
+ * Used by the worker to trigger Apple Pay Express. ECP mode broadcasts the ECP
+ * frame (unanswered) first; T-Money mode skips it. Both then run a standard
  * NFC-A WUPA + anticollision cascade to detect and identify the card the
  * device presents.
  *
- * This helper stops at SAK; the worker then runs the selection-only EMV probe.
+ * This helper stops at SAK; the worker then runs the selection-only EMV probe
+ * or the read-only KS X 6924 balance read.
  *
  * The firmware's Iso14443_3aPoller is internal and cannot be allocated from an
  * app, so this adapts the exported low-level primitives
