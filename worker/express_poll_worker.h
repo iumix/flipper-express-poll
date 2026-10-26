@@ -9,6 +9,7 @@
 
 #include "../balance/balance.h"
 #include "../nfca/emv_select.h"
+#include "../nfca/ksx6924.h"
 #include "../felica/felica_frames.h"
 
 #include <lib/nfc/protocols/iso14443_3a/iso14443_3a.h>
@@ -21,6 +22,7 @@ typedef struct ExpressPollWorker ExpressPollWorker;
 typedef enum {
     ExpressPollTechFelica, /**< NFC-F Polling: Express Transit (Suica, Octopus). */
     ExpressPollTechEcp, /**< NFC-A ECP broadcast: Express payment / open-loop transit. */
+    ExpressPollTechTmoney, /**< Plain NFC-A without ECP: T-Money (Wallet GenericA). */
 } ExpressPollTech;
 
 typedef enum {
@@ -79,10 +81,12 @@ typedef struct {
     uint8_t status1;
     uint8_t status2;
 
-    /* ECP / NFC-A (ExpressPollTechEcp). */
+    /* NFC-A (ExpressPollTechEcp, ExpressPollTechTmoney). */
     Iso14443_3aData nfca;
     EmvSelectResult emv_result;
     uint16_t emv_status_word;
+    Ksx6924Result tmoney_result; /**< T-Money read; the value is in balance. */
+    uint16_t tmoney_status_word;
 } ExpressPollStatus;
 
 /** Called from the NFC thread when status changed. Must not block. */

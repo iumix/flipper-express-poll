@@ -12,6 +12,6 @@ App(
     fap_category="NFC",
     fap_version="0.1",
     fap_icon="express_poll.png",  # 10x10 1-bit PNG
-    fap_description="NFC-F system code polling to trigger Express Mode, with read-only balance for Suica and Octopus",
+    fap_description="Triggers Apple Pay Express Mode via FeliCa polling, ECP, or T-Money NFC-A, with read-only balances",
     fap_author="iumix",
 )

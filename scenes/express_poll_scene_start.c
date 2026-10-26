@@ -3,6 +3,7 @@
 typedef enum {
     StartIndexFelica,
     StartIndexEcp,
+    StartIndexTmoney,
     StartIndexSettings,
     StartIndexAbout,
 } StartIndex;
@@ -25,6 +26,12 @@ void express_poll_scene_start_on_enter(void* context) {
     submenu_add_item(
         submenu, "ECP Polling", StartIndexEcp, express_poll_scene_start_submenu_callback, app);
     submenu_add_item(
+        submenu,
+        "T-Money Polling",
+        StartIndexTmoney,
+        express_poll_scene_start_submenu_callback,
+        app);
+    submenu_add_item(
         submenu, "Settings", StartIndexSettings, express_poll_scene_start_submenu_callback, app);
     submenu_add_item(
         submenu, "About", StartIndexAbout, express_poll_scene_start_submenu_callback, app);
@@ -41,6 +48,7 @@ bool express_poll_scene_start_on_event(void* context, SceneManagerEvent event) {
     static const ExpressPollScene next[] = {
         [StartIndexFelica] = ExpressPollSceneFelica,
         [StartIndexEcp] = ExpressPollScenePoll,
+        [StartIndexTmoney] = ExpressPollScenePoll,
         [StartIndexSettings] = ExpressPollSceneSettings,
         [StartIndexAbout] = ExpressPollSceneAbout,
     };
@@ -48,6 +56,7 @@ bool express_poll_scene_start_on_event(void* context, SceneManagerEvent event) {
 
     /* The Poll scene reads poll_tech to decide which technology to start. */
     if(event.event == StartIndexEcp) app->poll_tech = ExpressPollTechEcp;
+    if(event.event == StartIndexTmoney) app->poll_tech = ExpressPollTechTmoney;
 
     scene_manager_set_scene_state(app->scene_manager, ExpressPollSceneStart, event.event);
     scene_manager_next_scene(app->scene_manager, next[event.event]);

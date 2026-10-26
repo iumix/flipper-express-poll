@@ -7,7 +7,8 @@ protocol and hardware-test details are in `TECHNICAL.md`.
 ## Purpose and hard rules
 
 The app sends NFC-F Polling with a configurable system code to wake Express Transit
-cards in Apple Wallet, and reads balances using read-only FeliCa commands.
+cards in Apple Wallet, and reads balances using read-only FeliCa commands. It also
+wakes Express payment cards via ECP and T-Money via plain NFC-A polling.
 
 These rules are not negotiable:
 
@@ -22,12 +23,21 @@ These rules are not negotiable:
   GET DATA, GENERATE AC, authentication, or transaction commands. Do not extract,
   log, display or persist payment/cardholder data. ISO-DEP flow control and
   deselection are allowed; all exchanges must be bounded and cancellable.
+- **KS X 6924 (T-Money) read-only exception.** T-Money mode sends no ECP frame (any
+  ECP suppresses Wallet's GenericA express mode). After NFC-A identification, only
+  RATS, SELECT of AID `D4100000030001`, GET BALANCE (`90 4C 00 00 04`) and ISO-DEP
+  flow control/deselection are allowed. GET BALANCE is required because Wallet only
+  counts SELECT plus a successful command as a completed read. Parse only status
+  words and the 4-byte balance; discard the SELECT body (it holds the card number).
+  Never send purchase, load, INITIALIZE, READ RECORD/get-record or any other KS X
+  6924 command. All exchanges must be bounded and cancellable.
 - **No invented decoders.** Add a balance layout only if it comes from a verified
   source (the PN532 reference implementation, a public spec, or a documented hardware
   dump). Never show a value you cannot justify. Report errors instead.
 - **No simulated data.** No fake responses, hardcoded balances or placeholder polling.
 - **No payment features**: no payment transactions, terminal transaction processing,
-  or key/credential extraction. The selection-only exception above is the only EMV use.
+  or key/credential extraction. The selection-only exception above is the only EMV use,
+  and the KS X 6924 exception is the only T-Money use.
 - **Honest status.** Do not mark anything as hardware-verified in `README.md`
   unless someone actually ran it on a Flipper and recorded the result.
 
@@ -41,7 +51,9 @@ felica/felica_frames.[ch]       PURE: build/parse Polling, Request Service, Read
 felica/felica_systems.[ch]      PURE: system code names, hex parse/format, wildcard check
 nfca/ecp_frames.[ch]            PURE: build the Apple ECP frame (NFC-A, no CRC)
 nfca/nfca_poll.[ch]             ECP broadcast + NFC-A activation (WUPA + anticollision)
-nfca/emv_select.[ch]            PURE: bounded ISO-DEP + selection-only EMV probe
+nfca/iso_dep.[ch]               PURE: bounded ISO-DEP (RATS, APDU, WTX, chaining, DESELECT)
+nfca/emv_select.[ch]            PURE: selection-only EMV probe
+nfca/ksx6924.[ch]               PURE: read-only T-Money SELECT + GET BALANCE
 balance/balance.[ch]            PURE: decoder registry + formatting
 balance/balance_<system>.c      PURE: one decoder per system
 settings/express_poll_settings.[ch]  FlipperFormat load/save (/ext/apps_data/<appid>/settings.txt)
@@ -57,11 +69,13 @@ library, because they are compiled on the host by `tests/Makefile`.
 
 ## Architecture
 
-- **Two technologies, two modes.** `nfc_config()` binds one technology for the
+- **Separate modes.** `nfc_config()` binds one technology for the
   whole run and cannot switch mid-run (it requires the idle config state, reached
   only after `nfc_stop`). So FeliCa and NFC-A cannot share one poll loop; the
-  worker has a `tech` in its config (`ExpressPollTechFelica` / `ExpressPollTechEcp`)
-  and the UI exposes them as two separate menu entries that each start the worker.
+  worker has a `tech` in its config (`ExpressPollTechFelica` / `ExpressPollTechEcp` /
+  `ExpressPollTechTmoney`) and the UI exposes each as a menu entry that starts the worker.
+  ECP and T-Money are both NFC-A but stay separate: an ECP frame outranks and
+  suppresses Wallet's GenericA (T-Money) express mode.
 - **FeliCa transport:** the worker uses the raw `Nfc` API (`nfc_alloc`,
   `nfc_config(NfcModePoller, NfcTechFelica)`, `nfc_start`, `nfc_poller_trx`) with
   `felica_crc_append/check/trim`. The stock `felica_poller` is unusable here
@@ -77,6 +91,9 @@ library, because they are compiled on the host by `tests/Makefile`.
   `nfc_iso14443a_poller_trx_short_frame` / `_trx_sdd_frame` primitives) to get
   UID/ATQA/SAK. The selection-only exception above then permits ISO-DEP activation
   and payment application selection. Keep the FeliCa path unchanged.
+- **T-Money transport (NFC-A, GenericA):** same as ECP but without the ECP frame.
+  After activation the worker runs `ksx6924_read_balance` over the shared
+  `nfca/iso_dep.c` layer, then resets the field like ECP mode.
 - **Frames** built by `felica_frames.c` include the LEN byte but no CRC. Response
   buffers are passed with the CRC already trimmed. System codes are big-endian
   in Polling; service codes are little-endian everywhere else.

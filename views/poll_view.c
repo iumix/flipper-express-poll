@@ -109,12 +109,96 @@ static void poll_view_balance_line(const ExpressPollStatus* status, char* out, s
     }
 }
 
+static void poll_view_selection_line(const ExpressPollStatus* status, char* out, size_t out_size) {
+    const char* selection;
+    switch(status->emv_result) {
+    case EmvSelectOk:
+        selection = "App selected";
+        break;
+    case EmvSelectNotAttempted:
+        selection = "Selecting app...";
+        break;
+    case EmvSelectUnsupported:
+        selection = "ISO-DEP unsupported";
+        break;
+    case EmvSelectTimeout:
+        selection = "Select timed out";
+        break;
+    case EmvSelectProtocolError:
+        selection = "Invalid select reply";
+        break;
+    case EmvSelectTransportError:
+        selection = "Select NFC error";
+        break;
+    case EmvSelectNoApplication:
+        selection = "No payment app";
+        break;
+    case EmvSelectCancelled:
+        selection = "Selection stopped";
+        break;
+    case EmvSelectRejected:
+        snprintf(out, out_size, "Select rejected %04X", status->emv_status_word);
+        return;
+    default:
+        selection = "Selection unavailable";
+        break;
+    }
+    snprintf(out, out_size, "%s", selection);
+}
+
+static void poll_view_tmoney_line(const ExpressPollStatus* status, char* out, size_t out_size) {
+    const char* text;
+    switch(status->tmoney_result) {
+    case Ksx6924Ok:
+        snprintf(out, out_size, "Bal: %ld %s", (long)status->balance, KSX6924_CURRENCY);
+        return;
+    case Ksx6924NotAttempted:
+        text = "Reading balance...";
+        break;
+    case Ksx6924NoRats:
+        snprintf(out, out_size, "No RATS reply (SAK %02X)", status->nfca.sak);
+        return;
+    case Ksx6924Unsupported:
+        text = "ATS unsupported";
+        break;
+    case Ksx6924Timeout:
+        text = "Read timed out";
+        break;
+    case Ksx6924ProtocolError:
+        text = "Invalid card reply";
+        break;
+    case Ksx6924TransportError:
+        text = "Read NFC error";
+        break;
+    case Ksx6924NoApplication:
+        text = "No T-Money app";
+        break;
+    case Ksx6924SelectRejected:
+        snprintf(out, out_size, "Select rejected %04X", status->tmoney_status_word);
+        return;
+    case Ksx6924ReadRejected:
+        snprintf(out, out_size, "Read rejected %04X", status->tmoney_status_word);
+        return;
+    case Ksx6924InvalidBalance:
+        text = "Bal: invalid data";
+        break;
+    case Ksx6924Cancelled:
+        text = "Read stopped";
+        break;
+    default:
+        text = "Read unavailable";
+        break;
+    }
+    snprintf(out, out_size, "%s", text);
+}
+
 static void poll_view_draw_callback(Canvas* canvas, void* model_ptr) {
     const PollViewModel* model = model_ptr;
     const ExpressPollStatus* status = &model->status;
     char line[32];
 
     const bool ecp = status->tech == ExpressPollTechEcp;
+    const bool tmoney = status->tech == ExpressPollTechTmoney;
 
     canvas_clear(canvas);
 
@@ -124,6 +208,10 @@ static void poll_view_draw_callback(Canvas* canvas, void* model_ptr) {
         canvas_draw_str(canvas, 0, 9, "Express Card");
         canvas_set_font(canvas, FontSecondary);
         canvas_draw_str(canvas, 76, 9, "ECP A");
+    } else if(tmoney) {
+        canvas_draw_str(canvas, 0, 9, "T-Money");
+        canvas_set_font(canvas, FontSecondary);
+        canvas_draw_str(canvas, 76, 9, "NFC-A");
     } else {
         felica_system_code_format(status->polled_system_code, line);
         canvas_draw_str(canvas, 0, 9, line);
@@ -139,7 +227,7 @@ static void poll_view_draw_callback(Canvas* canvas, void* model_ptr) {
         canvas_draw_str_aligned(canvas, 128, 20, AlignRight, AlignBottom, line);
     }
 
-    if(status->has_card && ecp) {
+    if(status->has_card && (ecp || tmoney)) {
         char hex[ISO14443_3A_MAX_UID_SIZE * 2 + 1] = {0};
         poll_view_hex(status->nfca.uid, status->nfca.uid_len, hex, sizeof(hex));
         snprintf(line, sizeof(line), "UID %s", hex);
@@ -152,41 +240,12 @@ static void poll_view_draw_callback(Canvas* canvas, void* model_ptr) {
             status->nfca.atqa[0],
             status->nfca.sak);
         canvas_draw_str(canvas, 0, 39, line);
-        const char* selection;
-        switch(status->emv_result) {
-        case EmvSelectOk:
-            selection = "App selected";
-            break;
-        case EmvSelectNotAttempted:
-            selection = "Selecting app...";
-            break;
-        case EmvSelectUnsupported:
-            selection = "ISO-DEP unsupported";
-            break;
-        case EmvSelectTimeout:
-            selection = "Select timed out";
-            break;
-        case EmvSelectProtocolError:
-            selection = "Invalid select reply";
-            break;
-        case EmvSelectTransportError:
-            selection = "Select NFC error";
-            break;
-        case EmvSelectNoApplication:
-            selection = "No payment app";
-            break;
-        case EmvSelectCancelled:
-            selection = "Selection stopped";
-            break;
-        case EmvSelectRejected:
-            snprintf(line, sizeof(line), "Select rejected %04X", status->emv_status_word);
-            selection = line;
-            break;
-        default:
-            selection = "Selection unavailable";
-            break;
+        if(tmoney) {
+            poll_view_tmoney_line(status, line, sizeof(line));
+        } else {
+            poll_view_selection_line(status, line, sizeof(line));
         }
-        canvas_draw_str(canvas, 0, 48, selection);
+        canvas_draw_str(canvas, 0, 48, line);
     } else if(status->has_card) {
         char hex[FELICA_FRAME_IDM_LEN * 2 + 1] = {0};
         poll_view_hex(status->card.idm, FELICA_FRAME_IDM_LEN, hex, sizeof(hex));
@@ -199,7 +258,10 @@ static void poll_view_draw_callback(Canvas* canvas, void* model_ptr) {
         canvas_draw_str(canvas, 0, 48, line);
     } else if(model->running) {
         canvas_draw_str(canvas, 0, 32, "Hold iPhone, Watch or");
-        canvas_draw_str(canvas, 0, 41, ecp ? "payment card near back." : "card near the back.");
+        const char* hint = ecp    ? "payment card near back." :
+                           tmoney ? "T-Money card near back." :
+                                    "card near the back.";
+        canvas_draw_str(canvas, 0, 41, hint);
     } else {
         canvas_draw_str(canvas, 0, 36, "Press OK to start polling.");
     }

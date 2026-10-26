@@ -309,7 +309,7 @@ static void worker_step_felica(ExpressPollWorker* worker) {
     worker_step_wait(worker, phase);
 }
 
-/* --- ECP / NFC-A ---------------------------------------------------------- */
+/* --- NFC-A: ECP and T-Money ---------------------------------------------- */
 
 #define WORKER_UID_RANDOM_PREFIX 0x08U
 
@@ -327,7 +327,7 @@ static ExpressPollResult worker_ecp_result(NfcaPollResult result) {
     return ExpressPollResultTransportError;
 }
 
-static EmvSelectResult worker_emv_exchange(
+static IsoDepResult worker_iso_dep_exchange(
     void* context,
     const uint8_t* tx,
     size_t tx_len,
@@ -335,35 +335,35 @@ static EmvSelectResult worker_emv_exchange(
     size_t* rx_len,
     uint32_t fwt_fc) {
     ExpressPollWorker* worker = context;
-    if(worker->stop_requested) return EmvSelectCancelled;
+    if(worker->stop_requested) return IsoDepCancelled;
     bit_buffer_copy_bytes(worker->tx, tx, tx_len);
     iso14443_crc_append(Iso14443CrcTypeA, worker->tx);
     bit_buffer_reset(worker->rx);
     NfcError error = nfc_poller_trx(worker->nfc, worker->tx, worker->rx, fwt_fc);
-    EmvSelectResult result = EmvSelectOk;
+    IsoDepResult result = IsoDepOk;
     if(error == NfcErrorTimeout) {
-        result = EmvSelectTimeout;
+        result = IsoDepTimeout;
     } else if(error != NfcErrorNone) {
-        result = EmvSelectTransportError;
+        result = IsoDepTransportError;
     } else if(!iso14443_crc_check(Iso14443CrcTypeA, worker->rx)) {
-        result = EmvSelectProtocolError;
+        result = IsoDepProtocolError;
     } else {
         iso14443_crc_trim(worker->rx);
         size_t size = bit_buffer_get_size_bytes(worker->rx);
         if(size > *rx_len) {
-            result = EmvSelectProtocolError;
+            result = IsoDepProtocolError;
         } else {
             bit_buffer_write_bytes(worker->rx, rx, size);
             *rx_len = size;
         }
     }
-    /* Never keep selection responses around, whatever the outcome. */
+    /* Never keep card responses around, whatever the outcome. */
     bit_buffer_reset(worker->rx);
     bit_buffer_reset(worker->tx);
     return result;
 }
 
-static bool worker_emv_wait(void* context, uint32_t delay_fc) {
+static bool worker_iso_dep_wait(void* context, uint32_t delay_fc) {
     ExpressPollWorker* worker = context;
     worker_wait(worker, (delay_fc + 13559U) / 13560U);
     return !worker->stop_requested;
@@ -377,6 +377,9 @@ static void worker_handle_new_nfca(ExpressPollWorker* worker, const Iso14443_3aD
     worker->status.nfca = *data;
     worker->status.emv_result = EmvSelectNotAttempted;
     worker->status.emv_status_word = 0;
+    worker->status.tmoney_result = Ksx6924NotAttempted;
+    worker->status.tmoney_status_word = 0;
+    worker->status.balance = 0;
     worker->status.phase = ExpressPollPhaseReading;
     worker_unlock(worker);
 
@@ -384,17 +387,32 @@ static void worker_handle_new_nfca(ExpressPollWorker* worker, const Iso14443_3aD
     worker_notify(worker);
 
     uint16_t status_word = 0;
-    EmvSelectResult result = EmvSelectUnsupported;
-    if(iso14443_3a_supports_iso14443_4(data)) {
-        result = emv_select_run(worker_emv_exchange, worker_emv_wait, worker, &status_word);
+    if(worker->config.tech == ExpressPollTechTmoney) {
+        /* Try RATS even without the SAK flag: some dual-interface cards still answer. */
+        int32_t balance = 0;
+        Ksx6924Result result = ksx6924_read_balance(
+            worker_iso_dep_exchange, worker_iso_dep_wait, worker, &balance, &status_word);
+        worker_lock(worker);
+        worker->status.tmoney_result = result;
+        worker->status.tmoney_status_word = status_word;
+        worker->status.balance = result == Ksx6924Ok ? balance : 0;
+        worker_unlock(worker);
+    } else {
+        EmvSelectResult result = EmvSelectUnsupported;
+        if(iso14443_3a_supports_iso14443_4(data)) {
+            result =
+                emv_select_run(worker_iso_dep_exchange, worker_iso_dep_wait, worker, &status_word);
+        }
+        worker_lock(worker);
+        worker->status.emv_result = result;
+        worker->status.emv_status_word = status_word;
+        worker_unlock(worker);
     }
     /* Recover even if ATS/DESELECT failed, the card vanished, or it has no ISO-DEP:
      * an activated card ignores WUPA until the field drops. */
     worker->reset_field = true;
     worker_lock(worker);
     worker->status.phase = ExpressPollPhasePresent;
-    worker->status.emv_result = result;
-    worker->status.emv_status_word = status_word;
     worker_unlock(worker);
     worker_notify(worker);
 }
@@ -405,17 +423,20 @@ static bool worker_uid_is_random(const Iso14443_3aData* data) {
     return data->uid_len == 4 && data->uid[0] == WORKER_UID_RANDOM_PREFIX;
 }
 
-static void worker_step_ecp(ExpressPollWorker* worker) {
+static void worker_step_nfca(ExpressPollWorker* worker) {
     worker_lock(worker);
     const ExpressPollPhase phase = worker->status.phase;
     const Iso14443_3aData known = worker->status.nfca;
     worker_unlock(worker);
 
-    uint8_t frame[ECP_FRAME_PAYMENT_LEN];
-    size_t frame_len = ecp_frame_build_payment(frame, sizeof(frame));
-
-    /* Broadcast ECP (unanswered), then poll NFC-A for the presented card. */
-    NfcaPollResult ecp = nfca_poll_send_ecp(worker->nfc, worker->tx, worker->rx, frame, frame_len);
+    /* ECP mode broadcasts ECP (unanswered) before polling NFC-A. T-Money must not:
+     * any ECP frame outranks Wallet's GenericA express mode and suppresses it. */
+    NfcaPollResult ecp = NfcaPollResultOk;
+    if(worker->config.tech == ExpressPollTechEcp) {
+        uint8_t frame[ECP_FRAME_PAYMENT_LEN];
+        size_t frame_len = ecp_frame_build_payment(frame, sizeof(frame));
+        ecp = nfca_poll_send_ecp(worker->nfc, worker->tx, worker->rx, frame, frame_len);
+    }
     Iso14443_3aData data;
     NfcaPollResult act = (ecp == NfcaPollResultOk) ?
                              nfca_poll_activate(worker->nfc, worker->tx, worker->rx, &data) :
@@ -448,10 +469,10 @@ static NfcCommand worker_nfc_callback(NfcEvent event, void* context) {
 
     if(worker->stop_requested) return NfcCommandStop;
     if(event.type == NfcEventTypePollerReady) {
-        if(worker->config.tech == ExpressPollTechEcp) {
-            worker_step_ecp(worker);
-        } else {
+        if(worker->config.tech == ExpressPollTechFelica) {
             worker_step_felica(worker);
+        } else {
+            worker_step_nfca(worker);
         }
     }
     if(worker->stop_requested) return NfcCommandStop;
@@ -511,7 +532,7 @@ void express_poll_worker_start(ExpressPollWorker* worker, const ExpressPollWorke
     worker_unlock(worker);
 
     worker->nfc = nfc_alloc();
-    if(config->tech == ExpressPollTechEcp) {
+    if(config->tech != ExpressPollTechFelica) {
         nfc_config(worker->nfc, NfcModePoller, NfcTechIso14443a);
         nfc_set_guard_time_us(worker->nfc, ISO14443_3A_GUARD_TIME_US);
         nfc_set_fdt_poll_fc(worker->nfc, ISO14443_3A_FDT_POLL_FC);
@@ -525,7 +546,12 @@ void express_poll_worker_start(ExpressPollWorker* worker, const ExpressPollWorke
 
     worker->running = true;
     nfc_start(worker->nfc, worker_nfc_callback, worker);
-    FURI_LOG_I(TAG, "Polling %s", config->tech == ExpressPollTechEcp ? "ECP (NFC-A)" : "FeliCa");
+    static const char* const names[] = {
+        [ExpressPollTechFelica] = "FeliCa",
+        [ExpressPollTechEcp] = "ECP (NFC-A)",
+        [ExpressPollTechTmoney] = "T-Money (NFC-A)",
+    };
+    FURI_LOG_I(TAG, "Polling %s", names[config->tech]);
 }
 
 void express_poll_worker_stop(ExpressPollWorker* worker) {
