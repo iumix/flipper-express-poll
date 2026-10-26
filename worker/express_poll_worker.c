@@ -313,7 +313,7 @@ static void worker_step_felica(ExpressPollWorker* worker) {
 
 #define WORKER_UID_RANDOM_PREFIX 0x08U
 
-static ExpressPollResult worker_ecp_result(NfcaPollResult result) {
+static ExpressPollResult worker_nfca_result(NfcaPollResult result) {
     switch(result) {
     case NfcaPollResultOk:
         return ExpressPollResultSuccess;
@@ -444,7 +444,7 @@ static void worker_step_nfca(ExpressPollWorker* worker) {
 
     worker_lock(worker);
     worker->status.poll_count++;
-    worker->status.last_result = worker_ecp_result(act);
+    worker->status.last_result = worker_nfca_result(act);
     worker_unlock(worker);
 
     if(act == NfcaPollResultOk) {
@@ -481,6 +481,18 @@ static NfcCommand worker_nfc_callback(NfcEvent event, void* context) {
         return NfcCommandReset;
     }
     return NfcCommandContinue;
+}
+
+static const char* worker_tech_name(ExpressPollTech tech) {
+    switch(tech) {
+    case ExpressPollTechFelica:
+        return "FeliCa";
+    case ExpressPollTechEcp:
+        return "ECP (NFC-A)";
+    case ExpressPollTechTmoney:
+        return "T-Money (NFC-A)";
+    }
+    return "?";
 }
 
 /* --- Public API ----------------------------------------------------------- */
@@ -546,12 +558,7 @@ void express_poll_worker_start(ExpressPollWorker* worker, const ExpressPollWorke
 
     worker->running = true;
     nfc_start(worker->nfc, worker_nfc_callback, worker);
-    static const char* const names[] = {
-        [ExpressPollTechFelica] = "FeliCa",
-        [ExpressPollTechEcp] = "ECP (NFC-A)",
-        [ExpressPollTechTmoney] = "T-Money (NFC-A)",
-    };
-    FURI_LOG_I(TAG, "Polling %s", names[config->tech]);
+    FURI_LOG_I(TAG, "Polling %s", worker_tech_name(config->tech));
 }
 
 void express_poll_worker_stop(ExpressPollWorker* worker) {

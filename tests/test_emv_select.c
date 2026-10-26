@@ -235,7 +235,7 @@ int main(void) {
     s.lengths[1] = 1;
     expect(&s, EmvSelectUnsupported, 0);
     assert(s.selects == 0);
-    /* FSC 16 cannot carry SELECT PPSE without outbound chaining. */
+    /* FSC 16 cannot carry SELECT PPSE without outbound chaining: unsupported, not sent. */
     const uint8_t small_fsc[] = {2, 0x00};
     s = normal();
     s.replies[0] = small_fsc;
@@ -243,7 +243,7 @@ int main(void) {
     s.replies[1] = deselected;
     s.lengths[1] = 1;
     s.count = 2;
-    expect(&s, EmvSelectProtocolError, 0);
+    expect(&s, EmvSelectUnsupported, 0);
     assert(s.selects == 0 && s.step == 2);
 
     uint8_t oversized[254] = {0x12};

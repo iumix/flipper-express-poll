@@ -1,6 +1,6 @@
 /**
  * @file express_poll_worker.h
- * @brief Background NFC-F polling and read-only balance retrieval.
+ * @brief Background polling (FeliCa, ECP, T-Money) and read-only balance retrieval.
  *
  * Runs on the firmware's NfcWorker thread via the raw Nfc transport. The GUI
  * thread starts/stops it and reads snapshots of its status.
@@ -54,7 +54,7 @@ typedef enum {
 
 typedef struct {
     ExpressPollTech tech;
-    uint16_t system_code; /**< FeliCa: code sent in Polling. Ignored for ECP. */
+    uint16_t system_code; /**< FeliCa only: code sent in Polling. */
     uint8_t request_code; /**< FeliCa only. */
     uint32_t interval_ms;
     bool read_balance; /**< FeliCa only. */

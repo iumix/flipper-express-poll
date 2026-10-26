@@ -22,7 +22,7 @@
 
 typedef enum {
     IsoDepOk,
-    IsoDepUnsupported, /**< ATS malformed or its guard time beyond the app's bound. */
+    IsoDepUnsupported, /**< ATS malformed, guard time too long, or APDU exceeds FSC. */
     IsoDepTimeout,
     IsoDepProtocolError,
     IsoDepTransportError,

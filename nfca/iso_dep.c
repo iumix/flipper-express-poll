@@ -80,11 +80,11 @@ IsoDepResult iso_dep_apdu(
     uint16_t* status_word) {
     *response_len = 0;
     *status_word = 0;
-    /* No outbound chaining: PCB + APDU + CRC_A must fit the card's FSC. */
-    if(!dep->active || !apdu || apdu_len == 0 || apdu_len > ISO_DEP_APDU_MAX ||
-       apdu_len + 3 > dep->fsc) {
+    if(!dep->active || !apdu || apdu_len == 0 || apdu_len > ISO_DEP_APDU_MAX) {
         return IsoDepProtocolError;
     }
+    /* No outbound chaining: PCB + APDU + CRC_A must fit the card's FSC. */
+    if(apdu_len + 3 > dep->fsc) return IsoDepUnsupported;
 
     uint8_t tx[1 + ISO_DEP_APDU_MAX] = {dep->block | ISO_DEP_I_BLOCK};
     memcpy(tx + 1, apdu, apdu_len);
@@ -108,11 +108,9 @@ IsoDepResult iso_dep_apdu(
                 outcome = IsoDepProtocolError;
                 break;
             }
-            if(dep->fwt > ISO_DEP_MAX_FWT_FC / rx[1]) {
-                outcome = IsoDepTimeout;
-                break;
-            }
-            timeout = dep->fwt * rx[1];
+            /* Honour the extension up to the cap; the exchange count bounds repeats. */
+            timeout = dep->fwt > ISO_DEP_MAX_FWT_FC / rx[1] ? ISO_DEP_MAX_FWT_FC :
+                                                              dep->fwt * rx[1];
             tx[0] = ISO_DEP_WTX;
             tx[1] = rx[1];
             tx_len = 2;

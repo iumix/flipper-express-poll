@@ -5,16 +5,36 @@
 /* AID and GET BALANCE: RfidResearchGroup/proxmark3 client/src/ksx6924/ksx6924core.c
  * (KSX6924Select, KSX6924GetBalance) and the Metrodroid wiki "South Korea" page:
  * 90 4C 00 00 04 returns the pre-paid balance as a 4-byte big-endian value in won. */
-#define KSX6924_BALANCE_LEN  4U
+#define ISO7816_CLA            0x00U
+#define ISO7816_INS_SELECT     0xA4U
+#define ISO7816_SELECT_BY_NAME 0x04U
+#define KSX6924_CLA            0x90U /* Proprietary class. */
+#define KSX6924_INS_BALANCE    0x4CU /* GET BALANCE: read-only. */
+#define KSX6924_AID_LEN        7U
+#define KSX6924_BALANCE_LEN    4U
 /* T-money maximum load (en.wikipedia.org/wiki/T-money); anything above is not a balance. */
-#define KSX6924_BALANCE_MAX  500000U
-#define KSX6924_SW_OK        0x9000U
-#define KSX6924_SW_NOT_FOUND 0x6A82U
+#define KSX6924_BALANCE_MAX    500000U
+#define KSX6924_SW_OK          0x9000U
+#define KSX6924_SW_NOT_FOUND   0x6A82U
 
 /* The only two APDUs this module may ever send. */
-static const uint8_t ksx6924_select[] =
-    {0x00, 0xA4, 0x04, 0x00, 0x07, 0xD4, 0x10, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00};
-static const uint8_t ksx6924_get_balance[] = {0x90, 0x4C, 0x00, 0x00, KSX6924_BALANCE_LEN};
+static const uint8_t ksx6924_select[] = {
+    ISO7816_CLA,
+    ISO7816_INS_SELECT,
+    ISO7816_SELECT_BY_NAME,
+    0x00,
+    KSX6924_AID_LEN,
+    0xD4, /* AID D4100000030001: T-Money (also Snapper). */
+    0x10,
+    0x00,
+    0x00,
+    0x03,
+    0x00,
+    0x01,
+    0x00, /* Le: maximum short response. */
+};
+static const uint8_t ksx6924_get_balance[] =
+    {KSX6924_CLA, KSX6924_INS_BALANCE, 0x00, 0x00, KSX6924_BALANCE_LEN};
 
 static Ksx6924Result ksx6924_result(IsoDepResult result) {
     switch(result) {

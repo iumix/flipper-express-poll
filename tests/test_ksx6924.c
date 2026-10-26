@@ -176,6 +176,20 @@ int main(void) {
     expect(&s, Ksx6924Ok, 0x9000, 12345);
     assert(s.pcbs[3] == 0xF2 && s.reads == 1);
 
+    /* A capped FWT still honours WTX (exchange asserts the cap on the extended wait). */
+    const uint8_t capped_ats[] = {3, 0x28, 0xB0};
+    s = normal();
+    s.replies[0] = capped_ats;
+    s.lengths[0] = sizeof(capped_ats);
+    s.replies[2] = wtx;
+    s.lengths[2] = sizeof(wtx);
+    s.replies[3] = balance_12345;
+    s.lengths[3] = sizeof(balance_12345);
+    s.replies[4] = deselected;
+    s.lengths[4] = sizeof(deselected);
+    s.count = 5;
+    expect(&s, Ksx6924Ok, 0x9000, 12345);
+
     /* Chained balance response: I-block with chaining, R(ACK), last I-block. */
     const uint8_t chained_first[] = {0x13, 0x00, 0x00};
     const uint8_t chained_last[] = {0x02, 0x30, 0x39, 0x90, 0x00};
